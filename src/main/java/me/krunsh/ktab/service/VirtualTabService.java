@@ -26,10 +26,11 @@ import me.krunsh.ktab.visibility.TabVisibilityController;
 /**
  * Service des entrées virtuelles du TAB.
  *
- * V5 :
+ * V6 :
  * - texte changé seul -> UPDATE_DISPLAY_NAME ;
  * - skin changée -> REMOVE_PLAYER + ADD_PLAYER ;
- * - l'UUID fake dépend du cacheKey de skin pour forcer le refresh client.
+ * - cache de résolution des skins configurées ;
+ * - preview temporaire d'une skin sur la première cellule.
  */
 public final class VirtualTabService {
 
@@ -43,6 +44,9 @@ public final class VirtualTabService {
 
     private final Map<UUID, List<VirtualEntry>> cache =
         new HashMap<UUID, List<VirtualEntry>>();
+
+    private final Map<UUID, SkinPreview> skinPreviews =
+        new HashMap<UUID, SkinPreview>();
 
     private BukkitTask task;
 
@@ -92,6 +96,7 @@ public final class VirtualTabService {
 
         stopTask();
         clearAll();
+        skinResolver.clearCache();
 
         if (!config.isEnabled()
                 || !config.isVirtualLayoutEnabled()) {
@@ -210,6 +215,7 @@ public final class VirtualTabService {
 
         if (viewerId != null) {
             cache.remove(viewerId);
+            skinPreviews.remove(viewerId);
         }
     }
 
@@ -222,6 +228,7 @@ public final class VirtualTabService {
         }
 
         cache.clear();
+        skinPreviews.clear();
     }
 
     /**
@@ -293,6 +300,93 @@ public final class VirtualTabService {
         return lastRemoves;
     }
 
+    public ResolvedTabSkin resolveSkin(
+            Player viewer,
+            String skinId) {
+
+        return skinResolver.resolve(
+            viewer,
+            skinId
+        );
+    }
+
+    public void clearSkinResolverCache() {
+        skinResolver.clearCache();
+    }
+
+    /**
+     * Applique temporairement une skin sur la première cellule du layout
+     * du viewer. Le layout lui-même n'est pas modifié.
+     */
+    public void previewSkin(
+            Player viewer,
+            String skinId,
+            long durationTicks) {
+
+        if (viewer == null
+                || !viewer.isOnline()) {
+
+            return;
+        }
+
+        long safeTicks =
+            Math.max(
+                20L,
+                durationTicks
+            );
+
+        long expiresAt =
+            System.currentTimeMillis()
+                + safeTicks * 50L;
+
+        skinPreviews.put(
+            viewer.getUniqueId(),
+            new SkinPreview(
+                skinId == null
+                    ? "none"
+                    : skinId,
+                expiresAt
+            )
+        );
+
+        refresh(viewer);
+    }
+
+    public void clearSkinPreview(
+            Player viewer) {
+
+        if (viewer == null) {
+            return;
+        }
+
+        skinPreviews.remove(
+            viewer.getUniqueId()
+        );
+
+        if (viewer.isOnline()) {
+            refresh(viewer);
+        }
+    }
+
+    public String getSkinPreviewId(
+            UUID viewerId) {
+
+        SkinPreview preview =
+            getActivePreview(
+                viewerId
+            );
+
+        return preview == null
+            ? ""
+            : preview.skinId;
+    }
+
+    public int getSkinPreviewCount() {
+
+        purgeExpiredSkinPreviews();
+        return skinPreviews.size();
+    }
+
     private void tick() {
 
         long started =
@@ -358,6 +452,11 @@ public final class VirtualTabService {
         List<VirtualEntry> next =
             new ArrayList<VirtualEntry>();
 
+        SkinPreview skinPreview =
+            getActivePreview(
+                viewer.getUniqueId()
+            );
+
         int max =
             Math.max(
                 previous.size(),
@@ -393,10 +492,20 @@ public final class VirtualTabService {
                 continue;
             }
 
+            String skinId =
+                cell.getSkinId();
+
+            if (index == 0
+                    && skinPreview != null) {
+
+                skinId =
+                    skinPreview.skinId;
+            }
+
             ResolvedTabSkin skin =
                 skinResolver.resolve(
                     viewer,
-                    cell.getSkinId()
+                    skinId
                 );
 
             if (old == null) {
@@ -631,11 +740,85 @@ public final class VirtualTabService {
         }
     }
 
+    private SkinPreview getActivePreview(
+            UUID viewerId) {
+
+        if (viewerId == null) {
+            return null;
+        }
+
+        SkinPreview preview =
+            skinPreviews.get(
+                viewerId
+            );
+
+        if (preview == null) {
+            return null;
+        }
+
+        if (preview.expiresAtMillis
+                <= System.currentTimeMillis()) {
+
+            skinPreviews.remove(
+                viewerId
+            );
+
+            return null;
+        }
+
+        return preview;
+    }
+
+    private void purgeExpiredSkinPreviews() {
+
+        List<UUID> expired =
+            new ArrayList<UUID>();
+
+        long now =
+            System.currentTimeMillis();
+
+        for (Map.Entry<UUID, SkinPreview> entry
+                : skinPreviews.entrySet()) {
+
+            if (entry.getValue() == null
+                    || entry.getValue()
+                        .expiresAtMillis <= now) {
+
+                expired.add(
+                    entry.getKey()
+                );
+            }
+        }
+
+        for (UUID viewerId : expired) {
+            skinPreviews.remove(viewerId);
+        }
+    }
+
     private void stopTask() {
 
         if (task != null) {
             task.cancel();
             task = null;
+        }
+    }
+
+    private static final class SkinPreview {
+
+        private final String skinId;
+        private final long expiresAtMillis;
+
+        private SkinPreview(
+                String skinId,
+                long expiresAtMillis) {
+
+            this.skinId =
+                skinId == null
+                    ? "none"
+                    : skinId;
+
+            this.expiresAtMillis =
+                expiresAtMillis;
         }
     }
 

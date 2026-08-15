@@ -1,7 +1,10 @@
 package me.krunsh.ktab.skin;
 
 /**
- * Texture prête à être injectée dans un GameProfile fake.
+ * Texture résolue et prête à être injectée dans un GameProfile fake.
+ *
+ * V6 conserve aussi les métadonnées de résolution afin que /ktab skin info
+ * puisse expliquer précisément d'où vient une tête.
  */
 public final class ResolvedTabSkin {
 
@@ -9,6 +12,8 @@ public final class ResolvedTabSkin {
         new ResolvedTabSkin(
             "",
             "",
+            "none",
+            "none",
             "none"
         );
 
@@ -16,10 +21,29 @@ public final class ResolvedTabSkin {
     private final String signature;
     private final String cacheKey;
 
+    private final String requestedId;
+    private final String source;
+
     public ResolvedTabSkin(
             String value,
             String signature,
             String cacheKey) {
+
+        this(
+            value,
+            signature,
+            cacheKey,
+            "",
+            "legacy"
+        );
+    }
+
+    public ResolvedTabSkin(
+            String value,
+            String signature,
+            String cacheKey,
+            String requestedId,
+            String source) {
 
         this.value =
             safe(value);
@@ -34,6 +58,14 @@ public final class ResolvedTabSkin {
             safeCacheKey.isEmpty()
                 ? "none"
                 : safeCacheKey;
+
+        this.requestedId =
+            safe(requestedId);
+
+        this.source =
+            safe(source).isEmpty()
+                ? "unknown"
+                : safe(source);
     }
 
     public String getValue() {
@@ -46,6 +78,18 @@ public final class ResolvedTabSkin {
 
     public String getCacheKey() {
         return cacheKey;
+    }
+
+    public String getRequestedId() {
+        return requestedId;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public int getValueLength() {
+        return value.length();
     }
 
     public boolean hasTexture() {

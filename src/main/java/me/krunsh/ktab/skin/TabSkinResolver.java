@@ -4,25 +4,34 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
 
 /**
- * Résout un skin_id du layout vers une texture GameProfile.
+ * Résout les skin_id du layout.
  *
  * IDs spéciaux :
- * - none    : aucune texture custom ;
- * - viewer  : skin du joueur qui regarde le TAB ;
- * - player  : alias de viewer.
+ * - none
+ * - viewer / player
+ * - player:<pseudo> pour copier la skin d'un joueur actuellement en ligne
+ *
+ * Les skins configurées hash/url/base64 sont mises en cache afin de ne pas
+ * reconstruire leur payload Base64 à chaque cellule et à chaque cycle.
  */
 public final class TabSkinResolver {
 
     private final KtabPlugin plugin;
     private final KtabConfig config;
+
+    private final Map<String, CachedConfiguredSkin> configuredCache =
+        new HashMap<String, CachedConfiguredSkin>();
 
     public TabSkinResolver(
             KtabPlugin plugin,
@@ -40,6 +49,10 @@ public final class TabSkinResolver {
         this.config = config;
     }
 
+    public void clearCache() {
+        configuredCache.clear();
+    }
+
     public ResolvedTabSkin resolve(
             Player viewer,
             String rawSkinId) {
@@ -53,14 +66,58 @@ public final class TabSkinResolver {
                 || "none".equals(skinId)
                 || "default_minecraft".equals(skinId)) {
 
-            return ResolvedTabSkin.NONE;
+            return new ResolvedTabSkin(
+                "",
+                "",
+                "none",
+                skinId.isEmpty()
+                    ? "none"
+                    : skinId,
+                "none"
+            );
         }
 
         if ("viewer".equals(skinId)
                 || "player".equals(skinId)) {
 
-            return resolveViewerSkin(
-                viewer
+            return resolvePlayerSkin(
+                viewer,
+                skinId,
+                "viewer"
+            );
+        }
+
+        if (skinId.startsWith(
+                "player:")) {
+
+            String playerName =
+                rawSkinId == null
+                    ? ""
+                    : rawSkinId.substring(
+                        rawSkinId.indexOf(':') + 1
+                    ).trim();
+
+            Player target =
+                Bukkit.getPlayerExact(
+                    playerName
+                );
+
+            if (target == null
+                    || !target.isOnline()) {
+
+                return empty(
+                    skinId,
+                    "player-offline",
+                    "missing:"
+                        + skinId
+                );
+            }
+
+            return resolvePlayerSkin(
+                target,
+                skinId,
+                "player:"
+                    + target.getName()
             );
         }
 
@@ -69,17 +126,70 @@ public final class TabSkinResolver {
                 skinId
             );
 
-        if (definition == null
-                || !definition.isEnabled()) {
+        if (definition == null) {
 
-            return ResolvedTabSkin.NONE;
+            return empty(
+                skinId,
+                "missing",
+                "missing:"
+                    + skinId
+            );
         }
+
+        if (!definition.isEnabled()) {
+
+            return empty(
+                skinId,
+                "disabled",
+                "disabled:"
+                    + skinId
+            );
+        }
+
+        String fingerprint =
+            fingerprint(
+                definition
+            );
+
+        CachedConfiguredSkin cached =
+            configuredCache.get(
+                skinId
+            );
+
+        if (cached != null
+                && fingerprint.equals(
+                    cached.fingerprint
+                )) {
+
+            return cached.skin;
+        }
+
+        ResolvedTabSkin resolved =
+            resolveConfigured(
+                skinId,
+                definition
+            );
+
+        configuredCache.put(
+            skinId,
+            new CachedConfiguredSkin(
+                fingerprint,
+                resolved
+            )
+        );
+
+        return resolved;
+    }
+
+    private ResolvedTabSkin resolveConfigured(
+            String skinId,
+            TabSkinDefinition definition) {
 
         String value =
             definition.getValue();
 
         String source =
-            "value";
+            "configured-value";
 
         if (value.isEmpty()) {
 
@@ -97,12 +207,12 @@ public final class TabSkinResolver {
                             .getTextureHash();
 
                 source =
-                    "hash";
+                    "configured-hash";
 
             } else if (!url.isEmpty()) {
 
                 source =
-                    "url";
+                    "configured-url";
             }
 
             if (!url.isEmpty()) {
@@ -115,48 +225,83 @@ public final class TabSkinResolver {
         }
 
         if (value.isEmpty()) {
-            return ResolvedTabSkin.NONE;
+
+            return empty(
+                skinId,
+                "configured-empty",
+                "empty:"
+                    + skinId
+            );
         }
 
-        String cacheKey =
+        String configuredKey =
             definition.getCacheKey();
 
-        if (cacheKey.isEmpty()) {
-
-            cacheKey =
-                "cfg:"
-                    + skinId
-                    + ":"
-                    + source
-                    + ":"
-                    + Integer.toHexString(
-                        value.hashCode()
-                    );
+        if (configuredKey.isEmpty()) {
+            configuredKey = "auto";
         }
+
+        /*
+         * Le hash de texture fait toujours partie de la clé finale.
+         * Même si l'admin oublie d'incrémenter cache_key, changer la texture
+         * provoquera donc automatiquement REMOVE + ADD côté client.
+         */
+        String cacheKey =
+            "cfg:"
+                + skinId
+                + ":"
+                + configuredKey
+                + ":"
+                + Integer.toHexString(
+                    value.hashCode()
+                )
+                + ":"
+                + Integer.toHexString(
+                    definition
+                        .getSignature()
+                        .hashCode()
+                );
 
         return new ResolvedTabSkin(
             value,
             definition.getSignature(),
-            cacheKey
+            cacheKey,
+            skinId,
+            source
         );
     }
 
-    private ResolvedTabSkin resolveViewerSkin(
-            Player viewer) {
+    private ResolvedTabSkin resolvePlayerSkin(
+            Player target,
+            String requestedId,
+            String source) {
 
-        if (viewer == null) {
-            return ResolvedTabSkin.NONE;
+        if (target == null
+                || !target.isOnline()) {
+
+            return empty(
+                requestedId,
+                "player-unavailable",
+                "missing:"
+                    + requestedId
+            );
         }
 
         try {
 
             Object profile =
                 findGameProfile(
-                    viewer
+                    target
                 );
 
             if (profile == null) {
-                return ResolvedTabSkin.NONE;
+
+                return empty(
+                    requestedId,
+                    "player-profile-null",
+                    "missing:"
+                        + requestedId
+                );
             }
 
             Method getProperties =
@@ -171,7 +316,13 @@ public final class TabSkinResolver {
                 );
 
             if (properties == null) {
-                return ResolvedTabSkin.NONE;
+
+                return empty(
+                    requestedId,
+                    "player-properties-null",
+                    "missing:"
+                        + requestedId
+                );
             }
 
             Object textures =
@@ -181,7 +332,13 @@ public final class TabSkinResolver {
                 );
 
             if (!(textures instanceof Collection<?>)) {
-                return ResolvedTabSkin.NONE;
+
+                return empty(
+                    requestedId,
+                    "player-textures-missing",
+                    "missing:"
+                        + requestedId
+                );
             }
 
             for (Object property
@@ -210,12 +367,15 @@ public final class TabSkinResolver {
                 return new ResolvedTabSkin(
                     value,
                     signature,
-                    "viewer:"
-                        + viewer.getUniqueId()
+                    source
+                        + ":"
+                        + target.getUniqueId()
                         + ":"
                         + Integer.toHexString(
                             value.hashCode()
-                        )
+                        ),
+                    requestedId,
+                    source
                 );
             }
 
@@ -229,8 +389,8 @@ public final class TabSkinResolver {
 
                 plugin.getLogger()
                     .warning(
-                        "Skin viewer introuvable pour "
-                            + viewer.getName()
+                        "Skin joueur introuvable pour "
+                            + target.getName()
                             + ": "
                             + failure.getClass()
                                 .getSimpleName()
@@ -240,37 +400,42 @@ public final class TabSkinResolver {
             }
         }
 
-        return ResolvedTabSkin.NONE;
+        return empty(
+            requestedId,
+            "player-texture-empty",
+            "missing:"
+                + requestedId
+        );
     }
 
     private Object findGameProfile(
-            Player viewer)
+            Player target)
             throws Exception {
 
         try {
 
             Method getProfile =
-                viewer.getClass()
+                target.getClass()
                     .getMethod(
                         "getProfile"
                     );
 
             return getProfile.invoke(
-                viewer
+                target
             );
 
         } catch (NoSuchMethodException ignored) {
         }
 
         Method getHandle =
-            viewer.getClass()
+            target.getClass()
                 .getMethod(
                     "getHandle"
                 );
 
         Object handle =
             getHandle.invoke(
-                viewer
+                target
             );
 
         if (handle == null) {
@@ -343,6 +508,38 @@ public final class TabSkinResolver {
         }
     }
 
+    private static ResolvedTabSkin empty(
+            String requestedId,
+            String source,
+            String cacheKey) {
+
+        return new ResolvedTabSkin(
+            "",
+            "",
+            cacheKey,
+            requestedId,
+            source
+        );
+    }
+
+    private static String fingerprint(
+            TabSkinDefinition definition) {
+
+        return definition.getId()
+            + "|"
+            + definition.isEnabled()
+            + "|"
+            + definition.getValue()
+            + "|"
+            + definition.getSignature()
+            + "|"
+            + definition.getTextureHash()
+            + "|"
+            + definition.getTextureUrl()
+            + "|"
+            + definition.getCacheKey();
+    }
+
     private static String encodeTextureUrl(
             String url) {
 
@@ -383,5 +580,22 @@ public final class TabSkinResolver {
                 .toLowerCase(
                     Locale.ROOT
                 );
+    }
+
+    private static final class CachedConfiguredSkin {
+
+        private final String fingerprint;
+        private final ResolvedTabSkin skin;
+
+        private CachedConfiguredSkin(
+                String fingerprint,
+                ResolvedTabSkin skin) {
+
+            this.fingerprint =
+                fingerprint;
+
+            this.skin =
+                skin;
+        }
     }
 }
