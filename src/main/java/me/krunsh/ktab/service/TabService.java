@@ -6,7 +6,6 @@ import java.util.UUID;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitTask;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.cache.RenderedTabCache;
@@ -17,10 +16,10 @@ import me.krunsh.ktab.render.PlaceholderRenderer;
 /**
  * Service Header/Footer et player-list-name.
  *
- * V3 :
- * - refresh ciblé ;
- * - refresh global à la demande ;
- * - invalidation immédiate au quit.
+ * V9.1 :
+ * - plus aucune boucle globale interne ;
+ * - KtabSchedulerService répartit les viewers sur les ticks ;
+ * - le cache existant continue d'empêcher les packets inutiles.
  */
 public final class TabService {
 
@@ -33,10 +32,11 @@ public final class TabService {
 
     private final TabPacketSender packetSender;
 
-    private BukkitTask task;
-
     private long lastCycleMillis;
     private int lastPacketCount;
+
+    private long totalRefreshes;
+    private long totalPackets;
 
     public TabService(
             KtabPlugin plugin,
@@ -62,7 +62,6 @@ public final class TabService {
 
     public void start() {
 
-        stopTask();
         cache.clear();
 
         if (!config.isEnabled()) {
@@ -74,29 +73,10 @@ public final class TabService {
             return;
         }
 
-        long interval =
-            config.getUpdateIntervalTicks();
-
-        task =
-            Bukkit.getScheduler()
-                .runTaskTimer(
-                    plugin,
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            tick();
-                        }
-                    },
-                    1L,
-                    interval
-                );
-
         plugin.getLogger().info(
-            "TabService actif - NMS="
+            "TabService prêt - NMS="
                 + packetSender.getNmsVersion()
-                + ", interval="
-                + interval
-                + " ticks."
+                + ", scheduler=central V9."
         );
     }
 
@@ -106,7 +86,6 @@ public final class TabService {
 
     public void shutdown() {
 
-        stopTask();
         resetListNames();
         cache.clear();
     }
@@ -121,10 +100,32 @@ public final class TabService {
             return;
         }
 
-        renderAndSend(
-            player,
-            false
-        );
+        long started =
+            System.nanoTime();
+
+        boolean packet =
+            renderAndSend(
+                player,
+                false
+            );
+
+        totalRefreshes++;
+
+        lastPacketCount =
+            packet
+                ? 1
+                : 0;
+
+        if (packet) {
+            totalPackets++;
+        }
+
+        lastCycleMillis =
+            Math.max(
+                0L,
+                (System.nanoTime() - started)
+                    / 1000000L
+            );
     }
 
     public void refreshAll() {
@@ -133,11 +134,54 @@ public final class TabService {
             return;
         }
 
+        long started =
+            System.nanoTime();
+
+        int packets =
+            0;
+
+        List<UUID> onlineIds =
+            new ArrayList<UUID>();
+
         for (Player player
                 : Bukkit.getOnlinePlayers()) {
 
-            refresh(player);
+            if (player == null
+                    || !player.isOnline()) {
+
+                continue;
+            }
+
+            onlineIds.add(
+                player.getUniqueId()
+            );
+
+            if (renderAndSend(
+                    player,
+                    false)) {
+
+                packets++;
+            }
+
+            totalRefreshes++;
         }
+
+        cache.retainOnly(
+            onlineIds
+        );
+
+        lastPacketCount =
+            packets;
+
+        totalPackets +=
+            packets;
+
+        lastCycleMillis =
+            Math.max(
+                0L,
+                (System.nanoTime() - started)
+                    / 1000000L
+            );
     }
 
     public void remove(
@@ -172,50 +216,21 @@ public final class TabService {
         return lastPacketCount;
     }
 
-    private void tick() {
+    public long getTotalRefreshes() {
+        return totalRefreshes;
+    }
 
-        long started =
-            System.nanoTime();
+    public long getTotalPackets() {
+        return totalPackets;
+    }
 
-        int packets = 0;
+    public void resetPerformanceMetrics() {
 
-        List<UUID> onlineIds =
-            new ArrayList<UUID>();
+        totalRefreshes = 0L;
+        totalPackets = 0L;
 
-        for (Player player
-                : Bukkit.getOnlinePlayers()) {
-
-            if (player == null
-                    || !player.isOnline()) {
-
-                continue;
-            }
-
-            onlineIds.add(
-                player.getUniqueId()
-            );
-
-            if (renderAndSend(
-                    player,
-                    false)) {
-
-                packets++;
-            }
-        }
-
-        cache.retainOnly(
-            onlineIds
-        );
-
-        lastPacketCount =
-            packets;
-
-        lastCycleMillis =
-            Math.max(
-                0L,
-                (System.nanoTime() - started)
-                    / 1000000L
-            );
+        lastPacketCount = 0;
+        lastCycleMillis = 0L;
     }
 
     private boolean renderAndSend(
@@ -313,14 +328,6 @@ public final class TabService {
                     player.getName()
                 );
             }
-        }
-    }
-
-    private void stopTask() {
-
-        if (task != null) {
-            task.cancel();
-            task = null;
         }
     }
 }

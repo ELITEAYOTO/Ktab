@@ -17,6 +17,9 @@ import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.layout.LayoutDecision;
 import me.krunsh.ktab.layout.LayoutRenderResult;
 import me.krunsh.ktab.layout.RenderedVirtualCell;
+import me.krunsh.ktab.performance.DirtyReason;
+import me.krunsh.ktab.performance.KtabSchedulerService;
+import me.krunsh.ktab.performance.PerformanceMetrics;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 import me.krunsh.ktab.service.TabService;
 import me.krunsh.ktab.service.VirtualTabService;
@@ -43,6 +46,7 @@ public final class KtabCommand
     private final TabService tabService;
     private final VirtualTabService virtualTabService;
     private final TabVisibilityController visibilityController;
+    private final KtabSchedulerService schedulerService;
 
     public KtabCommand(
             KtabPlugin plugin,
@@ -50,7 +54,8 @@ public final class KtabCommand
             PlaceholderRenderer renderer,
             TabService tabService,
             VirtualTabService virtualTabService,
-            TabVisibilityController visibilityController) {
+            TabVisibilityController visibilityController,
+            KtabSchedulerService schedulerService) {
 
         this.plugin = plugin;
         this.config = config;
@@ -58,6 +63,7 @@ public final class KtabCommand
         this.tabService = tabService;
         this.virtualTabService = virtualTabService;
         this.visibilityController = visibilityController;
+        this.schedulerService = schedulerService;
     }
 
     @Override
@@ -172,6 +178,19 @@ public final class KtabCommand
             return true;
         }
 
+        if ("perf".equalsIgnoreCase(
+                args[0])
+                || "performance".equalsIgnoreCase(
+                    args[0])) {
+
+            handlePerformance(
+                sender,
+                args
+            );
+
+            return true;
+        }
+
         if ("skin".equalsIgnoreCase(
                 args[0])
                 || "skins".equalsIgnoreCase(
@@ -215,6 +234,7 @@ public final class KtabCommand
                     "clear",
                     "validate",
                     "dump",
+                    "perf",
                     "skin"
                 )
             );
@@ -222,6 +242,19 @@ public final class KtabCommand
 
         String root =
             args[0].toLowerCase();
+
+        if (("perf".equals(root)
+                || "performance".equals(root))
+                && args.length == 2) {
+
+            return complete(
+                args[1],
+                Arrays.asList(
+                    "reset",
+                    "clearcache"
+                )
+            );
+        }
 
         if ("skin".equals(root)
                 || "skins".equals(root)) {
@@ -333,7 +366,12 @@ public final class KtabCommand
         boolean wasHidingRealPlayers =
             config.isHideRealPlayers();
 
+        boolean wasHidingServerNpcs =
+            config.isHideServerNpcs();
+
         config.reload();
+
+        renderer.clearCaches();
 
         visibilityController
             .refreshHooks();
@@ -348,18 +386,33 @@ public final class KtabCommand
 
         tabService.restart();
         virtualTabService.restart();
+        schedulerService.restart();
 
         if (config.isVirtualLayoutEnabled()) {
 
-            visibilityController
-                .applyAll();
+            boolean visibilityBecameStricter =
+                (!wasHidingRealPlayers
+                    && config.isHideRealPlayers())
+                || (!wasHidingServerNpcs
+                    && config.isHideServerNpcs());
 
-            virtualTabService
-                .refreshAll();
+            if (visibilityBecameStricter) {
+
+                visibilityController
+                    .applyAllBatched();
+            }
+
+            schedulerService
+                .markAllDirty(
+                    DirtyReason.CONFIG
+                );
         }
 
         sender.sendMessage(
-            "§aKtab rechargé."
+            "§aKtab rechargé. §7Scheduler V9="
+                + yn(
+                    config.isPerformanceEnabled()
+                )
         );
     }
 
@@ -371,12 +424,19 @@ public final class KtabCommand
                 && "all".equalsIgnoreCase(
                     args[1])) {
 
-            visibilityController.applyAll();
-            tabService.refreshAll();
-            virtualTabService.refreshAll();
+            /*
+             * Un refresh global explicite ne doit pas créer un spike à
+             * 700 joueurs : on remplit la DirtyQueue dédupliquée.
+             */
+            schedulerService
+                .markAllDirty(
+                    DirtyReason.MANUAL
+                );
 
             sender.sendMessage(
-                "§aRefresh Ktab demandé pour tous les joueurs."
+                "§aRefresh Ktab global mis en file. §7Queue=§f"
+                    + schedulerService
+                        .getDirtyQueueSize()
             );
 
             return;
@@ -393,20 +453,18 @@ public final class KtabCommand
             return;
         }
 
-        visibilityController.apply(
-            target
-        );
+        visibilityController
+            .hideExistingFrom(
+                target
+            );
 
-        tabService.refresh(
-            target
-        );
-
-        virtualTabService.refresh(
-            target
-        );
+        schedulerService
+            .forceRefresh(
+                target
+            );
 
         sender.sendMessage(
-            "§aRefresh Ktab demandé pour §e"
+            "§aRefresh Ktab immédiat pour §e"
                 + target.getName()
                 + "§a."
         );
@@ -448,6 +506,263 @@ public final class KtabCommand
             "§aEntrées virtuelles retirées pour §e"
                 + target.getName()
                 + "§a."
+        );
+    }
+
+    private void handlePerformance(
+            CommandSender sender,
+            String[] args) {
+
+        if (args.length >= 2
+                && "reset".equalsIgnoreCase(
+                    args[1])) {
+
+            schedulerService
+                .resetMetrics();
+
+            sender.sendMessage(
+                "§aMétriques Ktab remises à zéro."
+            );
+
+            return;
+        }
+
+        if (args.length >= 2
+                && "clearcache".equalsIgnoreCase(
+                    args[1])) {
+
+            renderer.clearCaches();
+
+            schedulerService
+                .markAllDirty(
+                    DirtyReason.MANUAL
+                );
+
+            sender.sendMessage(
+                "§aCaches templates/placeholders vidés. §7Refresh global mis en file."
+            );
+
+            return;
+        }
+
+        PerformanceMetrics metrics =
+            schedulerService
+                .getMetrics();
+
+        sender.sendMessage(
+            "§8----------------------------------------"
+        );
+
+        sender.sendMessage(
+            "§6§lKtab §7- Performance V9"
+        );
+
+        sender.sendMessage(
+            "§7Online: §f"
+                + Bukkit.getOnlinePlayers()
+                    .size()
+                + " §8| §7wheel=§f"
+                + schedulerService
+                    .getWheelSize()
+        );
+
+        sender.sendMessage(
+            "§7Scheduler: "
+                + yn(
+                    config.isPerformanceEnabled()
+                )
+                + " §8| §7window=§f"
+                + config
+                    .getPerformanceRefreshWindowTicks()
+                + "t §8| §7regular/tick=§f"
+                + schedulerService
+                    .getRecommendedRegularPerTick()
+        );
+
+        sender.sendMessage(
+            "§7Cycle estimé: §f"
+                + schedulerService
+                    .getEstimatedCycleTicks()
+                + "t §8| §7max regular=§f"
+                + config
+                    .getPerformanceMaxViewersPerTick()
+        );
+
+        sender.sendMessage(
+            "§7Dirty queue: "
+                + yn(
+                    config.isPerformanceDirtyQueueEnabled()
+                )
+                + " §8| §7now=§f"
+                + schedulerService
+                    .getDirtyQueueSize()
+                + " §8| §7peak=§f"
+                + schedulerService
+                    .getDirtyQueuePeak()
+                + " §8| §7max/tick=§f"
+                + config
+                    .getPerformanceMaxDirtyPerTick()
+        );
+
+        sender.sendMessage(
+            "§7Last tick: §f"
+                + formatMillis(
+                    metrics.getLastTickMillis()
+                )
+                + "ms §8| §7avg=§f"
+                + formatMillis(
+                    metrics.getAverageTickMillis()
+                )
+                + "ms §8| §7max=§f"
+                + formatMillis(
+                    metrics.getMaxTickMillis()
+                )
+                + "ms"
+        );
+
+        sender.sendMessage(
+            "§7Viewer render: avg=§f"
+                + formatMillis(
+                    metrics.getAverageViewerMillis()
+                )
+                + "ms §8| §7max=§f"
+                + formatMillis(
+                    metrics.getMaxViewerMillis()
+                )
+                + "ms"
+        );
+
+        sender.sendMessage(
+            "§7Last work: §edirty="
+                + metrics
+                    .getLastDirtyViewers()
+                + " §8| §aregular="
+                + metrics
+                    .getLastRegularViewers()
+        );
+
+        sender.sendMessage(
+            "§7Refresh totals: §f"
+                + metrics
+                    .getTotalViewerRefreshes()
+                + " §8(§e"
+                + metrics
+                    .getTotalDirtyRefreshes()
+                + " dirty§8 / §a"
+                + metrics
+                    .getTotalRegularRefreshes()
+                + " regular§8)"
+        );
+
+        sender.sendMessage(
+            "§7Virtual packets ops: §a+"
+                + virtualTabService
+                    .getTotalAdds()
+                + " §e~"
+                + virtualTabService
+                    .getTotalUpdates()
+                + " §c-"
+                + virtualTabService
+                    .getTotalRemoves()
+        );
+
+        sender.sendMessage(
+            "§7Header/Footer packets: §f"
+                + tabService
+                    .getTotalPackets()
+                + " §8/ §7renders=§f"
+                + tabService
+                    .getTotalRefreshes()
+        );
+
+        sender.sendMessage(
+            "§7Placeholder engine: compiled="
+                + yn(
+                    config
+                        .isPerformancePlaceholderCompiledTemplates()
+                )
+                + " §8| §7cache="
+                + yn(
+                    config
+                        .isPerformancePlaceholderCacheEnabled()
+                )
+                + " §8| §7templates=§f"
+                + renderer
+                    .getCompiledTemplateCount()
+        );
+
+        sender.sendMessage(
+            "§7Placeholder PAPI: req=§f"
+                + renderer
+                    .getTotalPlaceholderRequests()
+                + " §8| §7resolved=§f"
+                + renderer
+                    .getTotalPlaceholderResolved()
+                + " §8| §7hits=§a"
+                + renderer
+                    .getTotalPlaceholderCacheHits()
+                + " §8(§f"
+                + formatPercent(
+                    renderer
+                        .getPlaceholderCacheHitRate()
+                )
+                + "%§8)"
+        );
+
+        sender.sendMessage(
+            "§7Placeholder cache: snapshots=§f"
+                + renderer
+                    .getPlayerSnapshotCount()
+                + " §8| §7values=§f"
+                + renderer
+                    .getCachedPlaceholderValueCount()
+                + " §8| §7legacy calls=§f"
+                + renderer
+                    .getTotalLegacyPapiCalls()
+        );
+
+        sender.sendMessage(
+            "§7Placeholder TTL: default=§f"
+                + config
+                    .getPerformancePlaceholderDefaultTtlTicks()
+                + "t §8| §7max/player=§f"
+                + config
+                    .getPerformancePlaceholderMaxEntriesPerPlayer()
+        );
+
+        sender.sendMessage(
+            "§7Visibility: targeted=§f"
+                + visibilityController
+                    .getTargetedHideOperations()
+                + " §8| §7full=§f"
+                + visibilityController
+                    .getFullSweeps()
+                + " §8| §7npc=§f"
+                + visibilityController
+                    .getNpcSweeps()
+        );
+
+        sender.sendMessage(
+            "§7Visibility packets: §f"
+                + visibilityController
+                    .getPacketsSent()
+                + " §8| §7profile entries=§f"
+                + visibilityController
+                    .getProfileEntriesSent()
+        );
+
+        sender.sendMessage(
+            "§7Fallback visibility: §f"
+                + config
+                    .getPerformanceVisibilityFallbackScanTicks()
+                + "t §8| §7ServerNPC scan=§f"
+                + config
+                    .getPerformanceServerNpcScanTicks()
+                + "t"
+        );
+
+        sender.sendMessage(
+            "§8----------------------------------------"
         );
     }
 
@@ -1032,6 +1347,19 @@ public final class KtabCommand
         );
 
         sender.sendMessage(
+            "§7Performance V9: "
+                + yn(
+                    config.isPerformanceEnabled()
+                )
+                + " §8| §7wheel=§f"
+                + schedulerService
+                    .getWheelSize()
+                + " §8| §7dirty=§f"
+                + schedulerService
+                    .getDirtyQueueSize()
+        );
+
+        sender.sendMessage(
             "§7NMS visibility: §f"
                 + visibilityController
                     .getNmsVersion()
@@ -1339,11 +1667,34 @@ public final class KtabCommand
             : value;
     }
 
+    private static String formatPercent(
+            double value) {
+
+        return String.format(
+            java.util.Locale.US,
+            "%.1f",
+            value
+        );
+    }
+
+    private static String formatMillis(
+            double value) {
+
+        return String.format(
+            java.util.Locale.US,
+            "%.3f",
+            Math.max(
+                0.0D,
+                value
+            )
+        );
+    }
+
     private static void sendUsage(
             CommandSender sender) {
 
         sender.sendMessage(
-            "§7Usage: §e/ktab <status|reload|preview|debug|refresh|clear|validate|dump|skin>"
+            "§7Usage: §e/ktab <status|reload|preview|debug|refresh|clear|validate|dump|perf|skin>"
         );
     }
 

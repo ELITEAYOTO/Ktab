@@ -1,0 +1,34 @@
+# ============================================================
+# Ktab V9.1 — Performance Foundation
+# ============================================================
+
+performance:
+
+  enabled: true
+
+  scheduler:
+
+    # 700 joueurs / 40 ticks ~= 18 viewers réguliers par tick.
+    refresh_window_ticks: 40
+
+    # Plafond anti-spike.
+    max_viewers_per_tick: 25
+
+    # Rafraîchit progressivement les valeurs globales après join/quit.
+    refresh_global_on_join_quit: true
+
+    dirty_queue:
+      enabled: true
+      max_per_tick: 30
+
+  visibility:
+
+    # Join/quit ciblé : recommandé.
+    event_driven: true
+
+    # Désactivé par défaut pour éviter un gros sweep 700x700.
+    # Exemple diagnostic : 6000 = toutes les 5 minutes.
+    fallback_scan_ticks: 0
+
+    # Sweep léger des UUID ServerNPC.
+    servernpc_scan_ticks: 100

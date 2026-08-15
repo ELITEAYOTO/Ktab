@@ -11,12 +11,14 @@ import org.bukkit.event.player.PlayerQuitEvent;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
-import me.krunsh.ktab.service.TabService;
-import me.krunsh.ktab.service.VirtualTabService;
+import me.krunsh.ktab.performance.DirtyReason;
+import me.krunsh.ktab.performance.KtabSchedulerService;
 import me.krunsh.ktab.visibility.TabVisibilityController;
 
 /**
  * Lifecycle joueur Ktab.
+ *
+ * V9.1 supprime les anciens applyAll()/refreshAll() sur chaque join/quit.
  */
 public final class KtabPlayerListener
         implements Listener {
@@ -24,21 +26,18 @@ public final class KtabPlayerListener
     private final KtabPlugin plugin;
     private final KtabConfig config;
 
-    private final TabService tabService;
-    private final VirtualTabService virtualTabService;
+    private final KtabSchedulerService scheduler;
     private final TabVisibilityController visibilityController;
 
     public KtabPlayerListener(
             KtabPlugin plugin,
             KtabConfig config,
-            TabService tabService,
-            VirtualTabService virtualTabService,
+            KtabSchedulerService scheduler,
             TabVisibilityController visibilityController) {
 
         if (plugin == null
                 || config == null
-                || tabService == null
-                || virtualTabService == null
+                || scheduler == null
                 || visibilityController == null) {
 
             throw new IllegalArgumentException(
@@ -48,8 +47,7 @@ public final class KtabPlayerListener
 
         this.plugin = plugin;
         this.config = config;
-        this.tabService = tabService;
-        this.virtualTabService = virtualTabService;
+        this.scheduler = scheduler;
         this.visibilityController =
             visibilityController;
     }
@@ -82,17 +80,47 @@ public final class KtabPlayerListener
                             return;
                         }
 
-                        tabService.refresh(
+                        if (config.isPerformanceVisibilityEventDriven()) {
+
+                            /*
+                             * Le nouveau viewer retire la liste actuelle.
+                             */
+                            visibilityController
+                                .hideExistingFrom(
+                                    player
+                                );
+
+                            /*
+                             * Les viewers existants retirent uniquement le
+                             * profil du nouveau joueur.
+                             */
+                            visibilityController
+                                .hideRealPlayerFromOthers(
+                                    player
+                                );
+
+                        } else {
+
+                            visibilityController
+                                .applyAllBatched();
+                        }
+
+                        scheduler.register(
                             player
                         );
 
-                        /*
-                         * ServerNPC et le serveur vanilla ont eu le temps
-                         * d'ajouter leurs PlayerInfo. On les retire ensuite.
-                         */
-                        visibilityController.applyAll();
+                        scheduler.markDirty(
+                            player,
+                            DirtyReason.JOIN
+                        );
 
-                        virtualTabService.refreshAll();
+                        if (config
+                                .isPerformanceRefreshGlobalOnJoinQuit()) {
+
+                            scheduler.markAllDirty(
+                                DirtyReason.GLOBAL
+                            );
+                        }
                     }
                 },
                 config.getVisibilityInitialDelayTicks()
@@ -103,31 +131,25 @@ public final class KtabPlayerListener
     public void onQuit(
             PlayerQuitEvent event) {
 
-        final UUID playerId =
+        UUID playerId =
             event.getPlayer()
                 .getUniqueId();
 
-        tabService.remove(
+        scheduler.unregister(
             playerId
         );
 
-        virtualTabService.removeCache(
-            playerId
-        );
+        if (config
+                .isPerformanceRefreshGlobalOnJoinQuit()) {
 
-        plugin.getServer()
-            .getScheduler()
-            .runTaskLater(
-                plugin,
-                new Runnable() {
-                    @Override
-                    public void run() {
-
-                        visibilityController.applyAll();
-                        virtualTabService.refreshAll();
-                    }
-                },
-                1L
+            scheduler.markAllDirty(
+                DirtyReason.GLOBAL
             );
+        }
+
+        /*
+         * Aucun applyAll ici :
+         * vanilla retire déjà le profil du joueur déconnecté.
+         */
     }
 }

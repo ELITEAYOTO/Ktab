@@ -17,6 +17,10 @@ de KjobsUltimate : les données externes passent par **PlaceholderAPI**.
   - `UPDATE_DISPLAY_NAME` si seul le texte change ;
   - `REMOVE_PLAYER + ADD_PLAYER` si la skin change.
 - Cache par viewer.
+- Scheduler V9 réparti sur plusieurs ticks pour éviter les pics à forte charge.
+- DirtyQueue dédupliquée pour les refresh prioritaires.
+- Visibilité joueurs/NPC événementielle au lieu d'un `applyAll()` à chaque join/quit.
+- Métriques runtime avec `/ktab perf`.
 - Masquage des vrais joueurs dans le TAB sans les rendre invisibles en jeu.
 - Hook optionnel ServerNPC pour retirer les NPC du PlayerInfo/TAB.
 - PlaceholderAPI pour KjobsUltimate, Vault, Kfaction et autres expansions.
@@ -55,6 +59,12 @@ Ktab
 │   ├── TabPacketSender
 │   ├── VirtualTabPacketSender
 │   └── TabVisibilityPacketSender
+├── performance
+│   ├── KtabSchedulerService
+│   ├── RefreshWheel
+│   ├── DirtyQueue
+│   ├── DirtyReason
+│   └── PerformanceMetrics
 ├── render
 │   └── PlaceholderRenderer
 ├── service
@@ -163,6 +173,63 @@ Une row fixe reste stable même si une cellule conditionnelle disparaît.
 
 Plus de détails : [`docs/LAYOUT.md`](docs/LAYOUT.md).
 
+## Performance V9
+
+Ktab V9 introduit un scheduler central pour répartir le travail entre les ticks.
+
+Avec 700 joueurs et :
+
+```yaml
+performance:
+  enabled: true
+
+  scheduler:
+    refresh_window_ticks: 40
+    max_viewers_per_tick: 25
+
+    dirty_queue:
+      enabled: true
+      max_per_tick: 30
+```
+
+le budget régulier théorique est :
+
+```text
+ceil(700 / 40) = 18 viewers / tick
+```
+
+au lieu de rerendre 700 viewers sur le même tick.
+
+Les changements urgents passent par une `DirtyQueue` dédupliquée. Les joins/quits
+ne lancent plus de `refreshAll()` immédiat.
+
+La visibilité est également événementielle :
+
+```text
+JOIN nouveau joueur
+├── nouveau viewer : retire les profils déjà présents
+└── anciens viewers : retirent uniquement le nouveau profil
+```
+
+Le fallback reste configurable :
+
+```yaml
+performance:
+  visibility:
+    event_driven: true
+    fallback_scan_ticks: 0
+    servernpc_scan_ticks: 100
+```
+
+Diagnostic :
+
+```text
+/ktab perf
+/ktab perf reset
+```
+
+Plus de détails : [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
+
 ## Custom heads
 
 Exemple avec la skin du viewer :
@@ -247,6 +314,9 @@ Plus de détails : [`docs/CONDITIONS.md`](docs/CONDITIONS.md).
 /ktab validate
 /ktab dump [joueur] [page]
 
+/ktab perf
+/ktab perf reset
+
 /ktab skin list
 /ktab skin info <skinId> [joueur]
 /ktab skin test <skinId> [joueur]
@@ -316,10 +386,12 @@ indépendamment.
 docs/
 ├── CONDITIONS.md
 ├── LAYOUT.md
+├── PERFORMANCE.md
 ├── SKINS.md
 ├── config-v5-heads-example.yml
 ├── config-v7-layout-example.yml
-└── config-v8-conditions-example.yml
+├── config-v8-conditions-example.yml
+└── config-v9-performance-example.yml
 ```
 
 ## Compatibilité

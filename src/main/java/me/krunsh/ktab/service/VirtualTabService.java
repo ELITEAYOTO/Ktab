@@ -10,7 +10,6 @@ import java.util.UUID;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitTask;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
@@ -22,16 +21,15 @@ import me.krunsh.ktab.packet.VirtualTabPacketSender;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 import me.krunsh.ktab.skin.ResolvedTabSkin;
 import me.krunsh.ktab.skin.TabSkinResolver;
-import me.krunsh.ktab.visibility.TabVisibilityController;
 
 /**
  * Service des entrées virtuelles du TAB.
  *
- * V6 :
- * - texte changé seul -> UPDATE_DISPLAY_NAME ;
- * - skin changée -> REMOVE_PLAYER + ADD_PLAYER ;
- * - cache de résolution des skins configurées ;
- * - preview temporaire d'une skin sur la première cellule.
+ * V9.1 :
+ * - aucun scan global périodique interne ;
+ * - rafraîchissement piloté par KtabSchedulerService ;
+ * - diff texte/skin conservé ;
+ * - compteurs packets cumulés pour /ktab perf.
  */
 public final class VirtualTabService {
 
@@ -40,7 +38,6 @@ public final class VirtualTabService {
 
     private final VirtualLayoutRenderer layoutRenderer;
     private final VirtualTabPacketSender packetSender;
-    private final TabVisibilityController visibilityController;
     private final TabSkinResolver skinResolver;
 
     private final Map<UUID, List<VirtualEntry>> cache =
@@ -49,23 +46,24 @@ public final class VirtualTabService {
     private final Map<UUID, SkinPreview> skinPreviews =
         new HashMap<UUID, SkinPreview>();
 
-    private BukkitTask task;
-
     private long lastCycleMillis;
     private int lastAdds;
     private int lastUpdates;
     private int lastRemoves;
 
+    private long totalAdds;
+    private long totalUpdates;
+    private long totalRemoves;
+    private long totalRefreshes;
+
     public VirtualTabService(
             KtabPlugin plugin,
             KtabConfig config,
-            PlaceholderRenderer renderer,
-            TabVisibilityController visibilityController) {
+            PlaceholderRenderer renderer) {
 
         if (plugin == null
                 || config == null
-                || renderer == null
-                || visibilityController == null) {
+                || renderer == null) {
 
             throw new IllegalArgumentException(
                 "Dépendance VirtualTabService manquante."
@@ -74,8 +72,6 @@ public final class VirtualTabService {
 
         this.plugin = plugin;
         this.config = config;
-        this.visibilityController =
-            visibilityController;
 
         layoutRenderer =
             new VirtualLayoutRenderer(
@@ -95,7 +91,6 @@ public final class VirtualTabService {
 
     public void start() {
 
-        stopTask();
         clearAll();
         skinResolver.clearCache();
 
@@ -105,26 +100,10 @@ public final class VirtualTabService {
             return;
         }
 
-        task =
-            Bukkit.getScheduler()
-                .runTaskTimer(
-                    plugin,
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            tick();
-                        }
-                    },
-                    5L,
-                    config.getVirtualUpdateIntervalTicks()
-                );
-
         plugin.getLogger().info(
-            "VirtualTabService actif - NMS="
+            "VirtualTabService prêt - NMS="
                 + packetSender.getNmsVersion()
-                + ", interval="
-                + config.getVirtualUpdateIntervalTicks()
-                + " ticks, skins="
+                + ", scheduler=central V9, skins="
                 + config.getSkinCount()
                 + "."
         );
@@ -135,8 +114,6 @@ public final class VirtualTabService {
     }
 
     public void shutdown() {
-
-        stopTask();
         clearAll();
     }
 
@@ -151,11 +128,27 @@ public final class VirtualTabService {
             return;
         }
 
+        long started =
+            System.nanoTime();
+
+        lastAdds = 0;
+        lastUpdates = 0;
+        lastRemoves = 0;
+
         updateViewer(
             viewer,
             Bukkit.getOnlinePlayers()
                 .size()
         );
+
+        totalRefreshes++;
+
+        lastCycleMillis =
+            Math.max(
+                0L,
+                (System.nanoTime() - started)
+                    / 1000000L
+            );
     }
 
     public void refreshAll() {
@@ -165,6 +158,13 @@ public final class VirtualTabService {
 
             return;
         }
+
+        long started =
+            System.nanoTime();
+
+        lastAdds = 0;
+        lastUpdates = 0;
+        lastRemoves = 0;
 
         int onlinePlayers =
             Bukkit.getOnlinePlayers()
@@ -180,8 +180,17 @@ public final class VirtualTabService {
                     viewer,
                     onlinePlayers
                 );
+
+                totalRefreshes++;
             }
         }
+
+        lastCycleMillis =
+            Math.max(
+                0L,
+                (System.nanoTime() - started)
+                    / 1000000L
+            );
     }
 
     public void clear(
@@ -321,6 +330,34 @@ public final class VirtualTabService {
         return lastRemoves;
     }
 
+    public long getTotalAdds() {
+        return totalAdds;
+    }
+
+    public long getTotalUpdates() {
+        return totalUpdates;
+    }
+
+    public long getTotalRemoves() {
+        return totalRemoves;
+    }
+
+    public long getTotalRefreshes() {
+        return totalRefreshes;
+    }
+
+    public void resetPerformanceMetrics() {
+        totalAdds = 0L;
+        totalUpdates = 0L;
+        totalRemoves = 0L;
+        totalRefreshes = 0L;
+
+        lastAdds = 0;
+        lastUpdates = 0;
+        lastRemoves = 0;
+        lastCycleMillis = 0L;
+    }
+
     public ResolvedTabSkin resolveSkin(
             Player viewer,
             String skinId) {
@@ -408,51 +445,9 @@ public final class VirtualTabService {
         return skinPreviews.size();
     }
 
-    private void tick() {
-
-        long started =
-            System.nanoTime();
-
-        lastAdds = 0;
-        lastUpdates = 0;
-        lastRemoves = 0;
-
-        purgeOffline();
-
-        int onlinePlayers =
-            Bukkit.getOnlinePlayers()
-                .size();
-
-        for (Player viewer
-                : Bukkit.getOnlinePlayers()) {
-
-            if (viewer == null
-                    || !viewer.isOnline()) {
-
-                continue;
-            }
-
-            updateViewer(
-                viewer,
-                onlinePlayers
-            );
-        }
-
-        lastCycleMillis =
-            Math.max(
-                0L,
-                (System.nanoTime() - started)
-                    / 1000000L
-            );
-    }
-
     private void updateViewer(
             Player viewer,
             int onlinePlayers) {
-
-        visibilityController.apply(
-            viewer
-        );
 
         List<RenderedVirtualCell> rendered =
             layoutRenderer.render(
@@ -508,6 +503,7 @@ public final class VirtualTabService {
                     );
 
                     lastRemoves++;
+                totalRemoves++;
                 }
 
                 continue;
@@ -545,6 +541,7 @@ public final class VirtualTabService {
                 );
 
                 lastAdds++;
+                totalAdds++;
 
                 next.add(
                     entry
@@ -568,6 +565,7 @@ public final class VirtualTabService {
                 );
 
                 lastRemoves++;
+                totalRemoves++;
 
                 VirtualEntry replacement =
                     createEntry(
@@ -583,6 +581,7 @@ public final class VirtualTabService {
                 );
 
                 lastAdds++;
+                totalAdds++;
 
                 next.add(
                     replacement
@@ -606,6 +605,7 @@ public final class VirtualTabService {
                 );
 
                 lastUpdates++;
+                totalUpdates++;
             }
 
             next.add(
@@ -672,33 +672,6 @@ public final class VirtualTabService {
             text,
             skin
         );
-    }
-
-    private void purgeOffline() {
-
-        List<UUID> remove =
-            new ArrayList<UUID>();
-
-        for (UUID viewerId
-                : cache.keySet()) {
-
-            Player player =
-                Bukkit.getPlayer(
-                    viewerId
-                );
-
-            if (player == null
-                    || !player.isOnline()) {
-
-                remove.add(
-                    viewerId
-                );
-            }
-        }
-
-        for (UUID viewerId : remove) {
-            cache.remove(viewerId);
-        }
     }
 
     private void safeAdd(
@@ -813,14 +786,6 @@ public final class VirtualTabService {
 
         for (UUID viewerId : expired) {
             skinPreviews.remove(viewerId);
-        }
-    }
-
-    private void stopTask() {
-
-        if (task != null) {
-            task.cancel();
-            task = null;
         }
     }
 

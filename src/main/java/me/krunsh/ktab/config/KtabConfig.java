@@ -68,6 +68,26 @@ public final class KtabConfig {
     private boolean hideServerNpcs;
     private long visibilityInitialDelayTicks;
 
+    private boolean performanceEnabled;
+    private int performanceRefreshWindowTicks;
+    private int performanceMaxViewersPerTick;
+    private boolean performanceDirtyQueueEnabled;
+    private int performanceMaxDirtyPerTick;
+    private boolean performanceRefreshGlobalOnJoinQuit;
+    private boolean performanceVisibilityEventDriven;
+    private long performanceVisibilityFallbackScanTicks;
+    private long performanceServerNpcScanTicks;
+
+    private boolean performancePlaceholderCompiledTemplates;
+    private boolean performancePlaceholderDeduplicate;
+    private boolean performancePlaceholderCacheEnabled;
+    private long performancePlaceholderDefaultTtlTicks;
+    private int performancePlaceholderMaxEntriesPerPlayer;
+    private int performancePlaceholderMaxCompiledTemplates;
+
+    private List<PlaceholderCacheRule> performancePlaceholderCacheRules =
+        Collections.emptyList();
+
     public KtabConfig(
             KtabPlugin plugin) {
 
@@ -314,6 +334,128 @@ public final class KtabConfig {
                     20L
                 )
             );
+
+        performanceEnabled =
+            config.getBoolean(
+                "performance.enabled",
+                true
+            );
+
+        performanceRefreshWindowTicks =
+            Math.max(
+                1,
+                config.getInt(
+                    "performance.scheduler.refresh_window_ticks",
+                    40
+                )
+            );
+
+        performanceMaxViewersPerTick =
+            Math.max(
+                1,
+                config.getInt(
+                    "performance.scheduler.max_viewers_per_tick",
+                    25
+                )
+            );
+
+        performanceDirtyQueueEnabled =
+            config.getBoolean(
+                "performance.scheduler.dirty_queue.enabled",
+                true
+            );
+
+        performanceMaxDirtyPerTick =
+            Math.max(
+                1,
+                config.getInt(
+                    "performance.scheduler.dirty_queue.max_per_tick",
+                    30
+                )
+            );
+
+        performanceRefreshGlobalOnJoinQuit =
+            config.getBoolean(
+                "performance.scheduler.refresh_global_on_join_quit",
+                true
+            );
+
+        performanceVisibilityEventDriven =
+            config.getBoolean(
+                "performance.visibility.event_driven",
+                true
+            );
+
+        performanceVisibilityFallbackScanTicks =
+            Math.max(
+                0L,
+                config.getLong(
+                    "performance.visibility.fallback_scan_ticks",
+                    0L
+                )
+            );
+
+        performanceServerNpcScanTicks =
+            Math.max(
+                0L,
+                config.getLong(
+                    "performance.visibility.servernpc_scan_ticks",
+                    100L
+                )
+            );
+
+
+        performancePlaceholderCompiledTemplates =
+            config.getBoolean(
+                "performance.placeholders.compiled_templates",
+                true
+            );
+
+        performancePlaceholderDeduplicate =
+            config.getBoolean(
+                "performance.placeholders.deduplicate",
+                true
+            );
+
+        performancePlaceholderCacheEnabled =
+            config.getBoolean(
+                "performance.placeholders.cache.enabled",
+                true
+            );
+
+        performancePlaceholderDefaultTtlTicks =
+            Math.max(
+                0L,
+                config.getLong(
+                    "performance.placeholders.cache.default_ttl_ticks",
+                    40L
+                )
+            );
+
+        performancePlaceholderMaxEntriesPerPlayer =
+            Math.max(
+                8,
+                config.getInt(
+                    "performance.placeholders.cache.max_entries_per_player",
+                    64
+                )
+            );
+
+        performancePlaceholderMaxCompiledTemplates =
+            Math.max(
+                32,
+                config.getInt(
+                    "performance.placeholders.max_compiled_templates",
+                    512
+                )
+            );
+
+        performancePlaceholderCacheRules =
+            loadPlaceholderCacheRules(
+                config.getList(
+                    "performance.placeholders.cache.rules"
+                )
+            );
     }
 
     public boolean isEnabled() {
@@ -445,6 +587,158 @@ public final class KtabConfig {
 
     public long getVisibilityInitialDelayTicks() {
         return visibilityInitialDelayTicks;
+    }
+
+    public boolean isPerformanceEnabled() {
+        return performanceEnabled;
+    }
+
+    public int getPerformanceRefreshWindowTicks() {
+        return performanceRefreshWindowTicks;
+    }
+
+    public int getPerformanceMaxViewersPerTick() {
+        return performanceMaxViewersPerTick;
+    }
+
+    public boolean isPerformanceDirtyQueueEnabled() {
+        return performanceDirtyQueueEnabled;
+    }
+
+    public int getPerformanceMaxDirtyPerTick() {
+        return performanceMaxDirtyPerTick;
+    }
+
+    public boolean isPerformanceRefreshGlobalOnJoinQuit() {
+        return performanceRefreshGlobalOnJoinQuit;
+    }
+
+    public boolean isPerformanceVisibilityEventDriven() {
+        return performanceVisibilityEventDriven;
+    }
+
+    public long getPerformanceVisibilityFallbackScanTicks() {
+        return performanceVisibilityFallbackScanTicks;
+    }
+
+    public long getPerformanceServerNpcScanTicks() {
+        return performanceServerNpcScanTicks;
+    }
+
+
+    public boolean isPerformancePlaceholderCompiledTemplates() {
+        return performancePlaceholderCompiledTemplates;
+    }
+
+    public boolean isPerformancePlaceholderDeduplicate() {
+        return performancePlaceholderDeduplicate;
+    }
+
+    public boolean isPerformancePlaceholderCacheEnabled() {
+        return performancePlaceholderCacheEnabled;
+    }
+
+    public long getPerformancePlaceholderDefaultTtlTicks() {
+        return performancePlaceholderDefaultTtlTicks;
+    }
+
+    public int getPerformancePlaceholderMaxEntriesPerPlayer() {
+        return performancePlaceholderMaxEntriesPerPlayer;
+    }
+
+    public int getPerformancePlaceholderMaxCompiledTemplates() {
+        return performancePlaceholderMaxCompiledTemplates;
+    }
+
+    public List<PlaceholderCacheRule> getPerformancePlaceholderCacheRules() {
+        return performancePlaceholderCacheRules;
+    }
+
+    private List<PlaceholderCacheRule> loadPlaceholderCacheRules(
+            List<?> rawRules) {
+
+        if (rawRules == null
+                || rawRules.isEmpty()) {
+
+            return Collections.emptyList();
+        }
+
+        List<PlaceholderCacheRule> result =
+            new ArrayList<PlaceholderCacheRule>();
+
+        for (Object raw : rawRules) {
+
+            if (!(raw instanceof Map<?, ?>)) {
+                continue;
+            }
+
+            Map<?, ?> map =
+                (Map<?, ?>) raw;
+
+            Object matchValue =
+                map.get(
+                    "match"
+                );
+
+            Object ttlValue =
+                map.get(
+                    "ttl_ticks"
+                );
+
+            String match =
+                matchValue == null
+                    ? ""
+                    : String.valueOf(
+                        matchValue
+                    ).trim();
+
+            if (match.isEmpty()) {
+                continue;
+            }
+
+            long ttlTicks =
+                parseLong(
+                    ttlValue,
+                    performancePlaceholderDefaultTtlTicks
+                );
+
+            result.add(
+                new PlaceholderCacheRule(
+                    match,
+                    ttlTicks
+                )
+            );
+        }
+
+        return Collections.unmodifiableList(
+            result
+        );
+    }
+
+    private static long parseLong(
+            Object raw,
+            long fallback) {
+
+        if (raw == null) {
+            return fallback;
+        }
+
+        if (raw instanceof Number) {
+
+            return ((Number) raw)
+                .longValue();
+        }
+
+        try {
+
+            return Long.parseLong(
+                String.valueOf(raw)
+                    .trim()
+            );
+
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     private Map<String, TabSkinDefinition> loadSkins(

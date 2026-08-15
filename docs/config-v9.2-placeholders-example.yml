@@ -1,0 +1,34 @@
+# Ktab V9.2 — Exemple de cache PlaceholderAPI.
+
+performance:
+
+  placeholders:
+
+    compiled_templates: true
+    deduplicate: true
+
+    max_compiled_templates: 512
+
+    cache:
+
+      enabled: true
+
+      default_ttl_ticks: 40
+      max_entries_per_player: 64
+
+      rules:
+
+        - match: "%player_ping%"
+          ttl_ticks: 20
+
+        - match: "%kjob_claimable_quests%"
+          ttl_ticks: 40
+
+        - match: "%kjob_display_job*%"
+          ttl_ticks: 40
+
+        - match: "%kjob_level_*%"
+          ttl_ticks: 60
+
+        - match: "%kjob_*%"
+          ttl_ticks: 40

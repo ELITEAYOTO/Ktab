@@ -6,6 +6,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import me.krunsh.ktab.command.KtabCommand;
 import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.listener.KtabPlayerListener;
+import me.krunsh.ktab.performance.DirtyReason;
+import me.krunsh.ktab.performance.KtabSchedulerService;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 import me.krunsh.ktab.service.TabService;
 import me.krunsh.ktab.service.VirtualTabService;
@@ -13,9 +15,6 @@ import me.krunsh.ktab.visibility.TabVisibilityController;
 
 /**
  * Point d'entrée de Ktab.
- *
- * La classe principale ne contient plus la logique des commandes :
- * KtabCommand porte désormais toute l'administration et le Skin Toolkit.
  */
 public final class KtabPlugin extends JavaPlugin {
 
@@ -25,6 +24,7 @@ public final class KtabPlugin extends JavaPlugin {
     private TabService tabService;
     private VirtualTabService virtualTabService;
     private TabVisibilityController visibilityController;
+    private KtabSchedulerService schedulerService;
 
     @Override
     public void onEnable() {
@@ -37,7 +37,9 @@ public final class KtabPlugin extends JavaPlugin {
         ktabConfig.reload();
 
         placeholderRenderer =
-            new PlaceholderRenderer();
+            new PlaceholderRenderer(
+                ktabConfig
+            );
 
         tabService =
             new TabService(
@@ -56,8 +58,17 @@ public final class KtabPlugin extends JavaPlugin {
             new VirtualTabService(
                 this,
                 ktabConfig,
-                placeholderRenderer,
-                visibilityController
+                placeholderRenderer
+            );
+
+        schedulerService =
+            new KtabSchedulerService(
+                this,
+                ktabConfig,
+                tabService,
+                virtualTabService,
+                visibilityController,
+                placeholderRenderer
             );
 
         getServer()
@@ -66,8 +77,7 @@ public final class KtabPlugin extends JavaPlugin {
                 new KtabPlayerListener(
                     this,
                     ktabConfig,
-                    tabService,
-                    virtualTabService,
+                    schedulerService,
                     visibilityController
                 ),
                 this
@@ -77,6 +87,7 @@ public final class KtabPlugin extends JavaPlugin {
 
         tabService.start();
         virtualTabService.start();
+        schedulerService.start();
 
         if (ktabConfig.isVirtualLayoutEnabled()) {
 
@@ -88,8 +99,13 @@ public final class KtabPlugin extends JavaPlugin {
                         @Override
                         public void run() {
 
-                            visibilityController.applyAll();
-                            virtualTabService.refreshAll();
+                            visibilityController
+                                .applyAllBatched();
+
+                            schedulerService
+                                .markAllDirty(
+                                    DirtyReason.CONFIG
+                                );
                         }
                     },
                     ktabConfig
@@ -104,6 +120,10 @@ public final class KtabPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+
+        if (schedulerService != null) {
+            schedulerService.shutdown();
+        }
 
         if (virtualTabService != null) {
             virtualTabService.shutdown();
@@ -143,7 +163,8 @@ public final class KtabPlugin extends JavaPlugin {
                 placeholderRenderer,
                 tabService,
                 virtualTabService,
-                visibilityController
+                visibilityController,
+                schedulerService
             );
 
         command.setExecutor(

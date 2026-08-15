@@ -34,8 +34,10 @@ debug: false
 # PlaceholderAPI est le contrat principal entre Ktab et les autres plugins.
 placeholderapi: true
 
-# Fréquence du Header/Footer.
-# 20 ticks = 1 seconde.
+# Fréquence historique du Header/Footer.
+# En performance.enabled=true, le scheduler V9 utilise surtout
+# performance.scheduler.refresh_window_ticks.
+# Cette valeur reste utilisée en mode performance=false.
 update_interval_ticks: 40
 
 
@@ -93,6 +95,157 @@ visibility:
 
 
 # =====================================================================
+# PERFORMANCE V9
+# =====================================================================
+#
+# Objectif : éviter les gros pics lorsque le serveur contient plusieurs
+# centaines de joueurs.
+#
+# En mode performance, Header/Footer + layout virtuel utilisent le même
+# scheduler central. Ktab ne fait plus 700 rendus le même tick.
+#
+performance:
+
+  # true = scheduler V9 réparti + DirtyQueue.
+  # false = comportement de compatibilité : refresh global à intervalle fixe.
+  enabled: true
+
+
+  # -------------------------------------------------------------------
+  # SCHEDULER CENTRAL
+  # -------------------------------------------------------------------
+  scheduler:
+
+    # Fenêtre cible pour qu'un viewer reçoive son refresh de sécurité.
+    #
+    # Exemple 700 joueurs :
+    #   ceil(700 / 40) = 18 viewers réguliers / tick.
+    #
+    # 40 ticks = environ 2 secondes.
+    refresh_window_ticks: 40
+
+    # Sécurité anti-spike.
+    #
+    # Si le calcul théorique demande plus de 25 viewers/tick, le scheduler
+    # respecte ce plafond. Le cycle complet prendra alors un peu plus longtemps.
+    max_viewers_per_tick: 25
+
+    # Quand un joueur rejoint/quitte, %server_online% peut changer.
+    # true = tous les viewers sont marqués dirty mais traités progressivement.
+    # Il n'y a PAS de refresh global instantané.
+    refresh_global_on_join_quit: true
+
+    dirty_queue:
+
+      # File prioritaire dédupliquée par UUID.
+      # Plusieurs changements d'un même joueur fusionnent en un seul travail.
+      enabled: true
+
+      # Nombre maximum de viewers prioritaires traités par tick.
+      max_per_tick: 30
+
+
+  # -------------------------------------------------------------------
+  # VISIBILITÉ JOUEURS / SERVERNPC
+  # -------------------------------------------------------------------
+  visibility:
+
+    # Recommandé : true.
+    #
+    # Au join :
+    # - le nouveau joueur retire la liste actuelle ;
+    # - les autres viewers retirent uniquement le nouveau profil.
+    #
+    # On évite donc l'ancien applyAll() O(n²) à chaque join/quit.
+    event_driven: true
+
+    # Sweep complet de sécurité.
+    #
+    # 0 = désactivé (recommandé en production à forte population).
+    #
+    # Un sweep complet implique une grosse quantité de PlayerInfo lorsque
+    # plusieurs centaines de joueurs sont connectés. Active-le seulement
+    # comme filet de sécurité / diagnostic.
+    #
+    # Exemple : 6000 ticks = 5 minutes.
+    fallback_scan_ticks: 0
+
+    # ServerNPC peut réinjecter un PlayerInfo après le chargement d'une skin.
+    # Ce sweep ne traite QUE les UUID NPC.
+    #
+    # 100 ticks = 5 secondes.
+    # 0 = désactivé.
+    servernpc_scan_ticks: 100
+
+
+
+  # -------------------------------------------------------------------
+  # PLACEHOLDERS / SNAPSHOTS V9.2
+  # -------------------------------------------------------------------
+  #
+  # Ktab compile les templates %placeholder% une seule fois puis conserve
+  # un snapshot borné par joueur.
+  #
+  # Objectif :
+  # - ne plus appeler PlaceholderAPI plusieurs fois pour le même placeholder
+  #   utilisé dans Header + Footer + Layout + conditions ;
+  # - garder les TTL complètement configurables.
+  #
+  placeholders:
+
+    # Pré-découpe les textes en littéraux + tokens %...%.
+    compiled_templates: true
+
+    # Résout chaque placeholder unique séparément.
+    # Recommandé pour permettre la déduplication/cache ci-dessous.
+    deduplicate: true
+
+    # Protection mémoire du cache de templates.
+    max_compiled_templates: 512
+
+    cache:
+
+      enabled: true
+
+      # TTL appliqué lorsqu'aucune règle plus spécifique ne correspond.
+      #
+      # 40 ticks = 2 secondes.
+      default_ttl_ticks: 40
+
+      # Protection mémoire :
+      # maximum de valeurs cache par joueur.
+      #
+      # 64 × 700 joueurs = au maximum ~44 800 petites entrées.
+      max_entries_per_player: 64
+
+      # Les règles sont lues dans l'ordre.
+      # La PREMIÈRE règle qui match le token gagne.
+      #
+      # '*' = wildcard.
+      rules:
+
+        # Le ping peut varier rapidement.
+        - match: "%player_ping%"
+          ttl_ticks: 20
+
+        # Quêtes : valeur importante visuellement, garder assez réactif.
+        - match: "%kjob_claimable_quests%"
+          ttl_ticks: 40
+
+        # Nom / métier affiché.
+        - match: "%kjob_display_job*%"
+          ttl_ticks: 40
+
+        # Niveaux métiers : peut être légèrement plus cache.
+        - match: "%kjob_level_*%"
+          ttl_ticks: 60
+
+        # Le reste de Kjobs.
+        - match: "%kjob_*%"
+          ttl_ticks: 40
+
+
+# =====================================================================
 # SKINS / CUSTOM HEADS
 # =====================================================================
 #
@@ -141,8 +294,9 @@ virtual_layout:
 
   enabled: true
 
-  # Rafraîchissement du contenu virtuel.
-  # Le diff de Ktab empêche l'envoi de packets inutiles si rien n'a changé.
+  # Intervalle historique du layout virtuel.
+  # Utilisé surtout si performance.enabled=false.
+  # En V9 performant, refresh_window_ticks pilote la rotation des viewers.
   update_interval_ticks: 40
 
   # Minecraft 1.8 :
