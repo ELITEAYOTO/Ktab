@@ -88,6 +88,13 @@ public final class KtabConfig {
     private List<PlaceholderCacheRule> performancePlaceholderCacheRules =
         Collections.emptyList();
 
+    private boolean performancePacketBatchingEnabled;
+    private boolean performancePacketBatchAdd;
+    private boolean performancePacketBatchUpdate;
+    private boolean performancePacketBatchRemove;
+    private int performancePacketMaxEntriesPerPacket;
+    private long performancePacketFailureLogIntervalTicks;
+
     public KtabConfig(
             KtabPlugin plugin) {
 
@@ -456,6 +463,51 @@ public final class KtabConfig {
                     "performance.placeholders.cache.rules"
                 )
             );
+
+        performancePacketBatchingEnabled =
+            config.getBoolean(
+                "performance.packets.batching.enabled",
+                true
+            );
+
+        performancePacketBatchAdd =
+            config.getBoolean(
+                "performance.packets.batching.add",
+                true
+            );
+
+        performancePacketBatchUpdate =
+            config.getBoolean(
+                "performance.packets.batching.update",
+                true
+            );
+
+        performancePacketBatchRemove =
+            config.getBoolean(
+                "performance.packets.batching.remove",
+                true
+            );
+
+        performancePacketMaxEntriesPerPacket =
+            Math.max(
+                1,
+                Math.min(
+                    80,
+                    config.getInt(
+                        "performance.packets.batching.max_entries_per_packet",
+                        80
+                    )
+                )
+            );
+
+        performancePacketFailureLogIntervalTicks =
+            Math.max(
+                0L,
+                config.getLong(
+                    "performance.packets.failure_log_interval_ticks",
+                    100L
+                )
+            );
     }
 
     public boolean isEnabled() {
@@ -652,6 +704,30 @@ public final class KtabConfig {
 
     public List<PlaceholderCacheRule> getPerformancePlaceholderCacheRules() {
         return performancePlaceholderCacheRules;
+    }
+
+    public boolean isPerformancePacketBatchingEnabled() {
+        return performancePacketBatchingEnabled;
+    }
+
+    public boolean isPerformancePacketBatchAdd() {
+        return performancePacketBatchAdd;
+    }
+
+    public boolean isPerformancePacketBatchUpdate() {
+        return performancePacketBatchUpdate;
+    }
+
+    public boolean isPerformancePacketBatchRemove() {
+        return performancePacketBatchRemove;
+    }
+
+    public int getPerformancePacketMaxEntriesPerPacket() {
+        return performancePacketMaxEntriesPerPacket;
+    }
+
+    public long getPerformancePacketFailureLogIntervalTicks() {
+        return performancePacketFailureLogIntervalTicks;
     }
 
     private List<PlaceholderCacheRule> loadPlaceholderCacheRules(

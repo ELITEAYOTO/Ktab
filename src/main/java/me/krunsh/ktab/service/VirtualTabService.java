@@ -16,6 +16,7 @@ import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.layout.LayoutRenderResult;
 import me.krunsh.ktab.layout.RenderedVirtualCell;
 import me.krunsh.ktab.layout.VirtualLayoutRenderer;
+import me.krunsh.ktab.packet.PacketBatchResult;
 import me.krunsh.ktab.packet.VirtualEntry;
 import me.krunsh.ktab.packet.VirtualTabPacketSender;
 import me.krunsh.ktab.render.PlaceholderRenderer;
@@ -25,11 +26,12 @@ import me.krunsh.ktab.skin.TabSkinResolver;
 /**
  * Service des entrées virtuelles du TAB.
  *
- * V9.1 :
- * - aucun scan global périodique interne ;
- * - rafraîchissement piloté par KtabSchedulerService ;
- * - diff texte/skin conservé ;
- * - compteurs packets cumulés pour /ktab perf.
+ * V9.3 :
+ * - scheduler central V9 conservé ;
+ * - diff calculé avant tout envoi ;
+ * - ADD / UPDATE / REMOVE regroupés en batches configurables ;
+ * - le cache reflète uniquement les opérations dont l'envoi a réussi ;
+ * - un échec packet reste donc naturellement dirty au prochain refresh.
  */
 public final class VirtualTabService {
 
@@ -40,6 +42,10 @@ public final class VirtualTabService {
     private final VirtualTabPacketSender packetSender;
     private final TabSkinResolver skinResolver;
 
+    /**
+     * Les listes peuvent contenir des null : cela permet de représenter une
+     * cellule dont l'ADD a échoué sans décaler tous les index suivants.
+     */
     private final Map<UUID, List<VirtualEntry>> cache =
         new HashMap<UUID, List<VirtualEntry>>();
 
@@ -51,10 +57,21 @@ public final class VirtualTabService {
     private int lastUpdates;
     private int lastRemoves;
 
+    /** Opérations logiques sur des entrées. */
     private long totalAdds;
     private long totalUpdates;
     private long totalRemoves;
     private long totalRefreshes;
+
+    /** Packets réseau réellement remis à sendPacket. */
+    private long totalAddPackets;
+    private long totalUpdatePackets;
+    private long totalRemovePackets;
+
+    private long totalPacketFailures;
+    private long totalRetryEntries;
+
+    private long lastPacketFailureLogMillis;
 
     public VirtualTabService(
             KtabPlugin plugin,
@@ -103,7 +120,11 @@ public final class VirtualTabService {
         plugin.getLogger().info(
             "VirtualTabService prêt - NMS="
                 + packetSender.getNmsVersion()
-                + ", scheduler=central V9, skins="
+                + ", scheduler=central V9, batching="
+                + config.isPerformancePacketBatchingEnabled()
+                + ", maxBatch="
+                + config.getPerformancePacketMaxEntriesPerPacket()
+                + ", skins="
                 + config.getSkinCount()
                 + "."
         );
@@ -131,9 +152,7 @@ public final class VirtualTabService {
         long started =
             System.nanoTime();
 
-        lastAdds = 0;
-        lastUpdates = 0;
-        lastRemoves = 0;
+        resetLastOperations();
 
         updateViewer(
             viewer,
@@ -162,9 +181,7 @@ public final class VirtualTabService {
         long started =
             System.nanoTime();
 
-        lastAdds = 0;
-        lastUpdates = 0;
-        lastRemoves = 0;
+        resetLastOperations();
 
         int onlinePlayers =
             Bukkit.getOnlinePlayers()
@@ -211,13 +228,29 @@ public final class VirtualTabService {
             return;
         }
 
-        for (VirtualEntry entry : previous) {
-
-            safeRemove(
-                viewer,
-                entry
+        List<VirtualEntry> entries =
+            nonNullEntries(
+                previous
             );
+
+        if (entries.isEmpty()) {
+            return;
         }
+
+        PacketBatchResult result =
+            sendRemoveBatch(
+                viewer,
+                entries
+            );
+
+        recordRemoveBatch(
+            result
+        );
+
+        recordFailures(
+            result,
+            "clear"
+        );
     }
 
     public void removeCache(
@@ -267,9 +300,6 @@ public final class VirtualTabService {
         ).getCells();
     }
 
-    /**
-     * Preview texte historique utilisé par /ktab preview.
-     */
     public List<String> preview(
             Player viewer) {
 
@@ -309,9 +339,21 @@ public final class VirtualTabService {
                 viewerId
             );
 
-        return entries == null
-            ? 0
-            : entries.size();
+        if (entries == null) {
+            return 0;
+        }
+
+        int count =
+            0;
+
+        for (VirtualEntry entry : entries) {
+
+            if (entry != null) {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     public long getLastCycleMillis() {
@@ -346,15 +388,69 @@ public final class VirtualTabService {
         return totalRefreshes;
     }
 
+    public long getTotalAddPackets() {
+        return totalAddPackets;
+    }
+
+    public long getTotalUpdatePackets() {
+        return totalUpdatePackets;
+    }
+
+    public long getTotalRemovePackets() {
+        return totalRemovePackets;
+    }
+
+    public long getTotalNetworkPackets() {
+
+        return totalAddPackets
+            + totalUpdatePackets
+            + totalRemovePackets;
+    }
+
+    public long getTotalPacketFailures() {
+        return totalPacketFailures;
+    }
+
+    public long getTotalRetryEntries() {
+        return totalRetryEntries;
+    }
+
+    public double getPacketCompressionRatio() {
+
+        long operations =
+            totalAdds
+                + totalUpdates
+                + totalRemoves;
+
+        long packets =
+            getTotalNetworkPackets();
+
+        if (operations <= 0L
+                || packets <= 0L) {
+
+            return 0.0D;
+        }
+
+        return operations
+            / (double) packets;
+    }
+
     public void resetPerformanceMetrics() {
+
         totalAdds = 0L;
         totalUpdates = 0L;
         totalRemoves = 0L;
         totalRefreshes = 0L;
 
-        lastAdds = 0;
-        lastUpdates = 0;
-        lastRemoves = 0;
+        totalAddPackets = 0L;
+        totalUpdatePackets = 0L;
+        totalRemovePackets = 0L;
+        totalPacketFailures = 0L;
+        totalRetryEntries = 0L;
+
+        lastPacketFailureLogMillis = 0L;
+
+        resetLastOperations();
         lastCycleMillis = 0L;
     }
 
@@ -372,10 +468,6 @@ public final class VirtualTabService {
         skinResolver.clearCache();
     }
 
-    /**
-     * Applique temporairement une skin sur la première cellule du layout
-     * du viewer. Le layout lui-même n'est pas modifié.
-     */
     public void previewSkin(
             Player viewer,
             String skinId,
@@ -465,18 +557,245 @@ public final class VirtualTabService {
                 Collections.emptyList();
         }
 
-        List<VirtualEntry> next =
-            new ArrayList<VirtualEntry>();
-
         SkinPreview skinPreview =
             getActivePreview(
                 viewer.getUniqueId()
             );
 
+        List<VirtualEntry> desired =
+            buildDesiredEntries(
+                viewer,
+                rendered,
+                skinPreview
+            );
+
         int max =
             Math.max(
                 previous.size(),
-                rendered.size()
+                desired.size()
+            );
+
+        OperationKind[] operations =
+            new OperationKind[max];
+
+        List<VirtualEntry> removeEntries =
+            new ArrayList<VirtualEntry>();
+
+        List<VirtualEntry> pureAddEntries =
+            new ArrayList<VirtualEntry>();
+
+        List<VirtualEntry> updateEntries =
+            new ArrayList<VirtualEntry>();
+
+        for (int index = 0;
+                index < max;
+                index++) {
+
+            VirtualEntry old =
+                getEntry(
+                    previous,
+                    index
+                );
+
+            VirtualEntry wanted =
+                getEntry(
+                    desired,
+                    index
+                );
+
+            if (old == null
+                    && wanted == null) {
+
+                operations[index] =
+                    OperationKind.NONE;
+
+                continue;
+            }
+
+            if (old == null) {
+
+                operations[index] =
+                    OperationKind.ADD;
+
+                pureAddEntries.add(
+                    wanted
+                );
+
+                continue;
+            }
+
+            if (wanted == null) {
+
+                operations[index] =
+                    OperationKind.REMOVE;
+
+                removeEntries.add(
+                    old
+                );
+
+                continue;
+            }
+
+            boolean skinChanged =
+                !wanted.getSkin()
+                    .getCacheKey()
+                    .equals(
+                        old.getSkin()
+                            .getCacheKey()
+                    );
+
+            if (skinChanged) {
+
+                operations[index] =
+                    OperationKind.REPLACE;
+
+                removeEntries.add(
+                    old
+                );
+
+                continue;
+            }
+
+            if (!wanted.getDisplayName()
+                    .equals(
+                        old.getDisplayName()
+                    )) {
+
+                operations[index] =
+                    OperationKind.UPDATE;
+
+                updateEntries.add(
+                    wanted
+                );
+
+                continue;
+            }
+
+            operations[index] =
+                OperationKind.NONE;
+        }
+
+        int replacementCount =
+            countOperations(
+                operations,
+                OperationKind.REPLACE
+            );
+
+        int logicalAdds =
+            pureAddEntries.size()
+                + replacementCount;
+
+        int logicalRemoves =
+            removeEntries.size();
+
+        int logicalUpdates =
+            updateEntries.size();
+
+        lastAdds += logicalAdds;
+        lastRemoves += logicalRemoves;
+        lastUpdates += logicalUpdates;
+
+        totalAdds += logicalAdds;
+        totalRemoves += logicalRemoves;
+        totalUpdates += logicalUpdates;
+
+        PacketBatchResult removeResult =
+            sendRemoveBatch(
+                viewer,
+                removeEntries
+            );
+
+        recordRemoveBatch(
+            removeResult
+        );
+
+        PacketBatchResult updateResult =
+            sendUpdateBatch(
+                viewer,
+                updateEntries
+            );
+
+        recordUpdateBatch(
+            updateResult
+        );
+
+        PacketBatchResult pureAddResult =
+            sendAddBatch(
+                viewer,
+                pureAddEntries
+            );
+
+        recordAddBatch(
+            pureAddResult
+        );
+
+        List<VirtualEntry> replacementAdds =
+            new ArrayList<VirtualEntry>();
+
+        for (int index = 0;
+                index < max;
+                index++) {
+
+            if (operations[index]
+                    != OperationKind.REPLACE) {
+
+                continue;
+            }
+
+            VirtualEntry old =
+                getEntry(
+                    previous,
+                    index
+                );
+
+            if (removeResult.wasSuccessful(
+                    old)) {
+
+                VirtualEntry wanted =
+                    getEntry(
+                        desired,
+                        index
+                    );
+
+                if (wanted != null) {
+                    replacementAdds.add(wanted);
+                }
+            }
+        }
+
+        PacketBatchResult replacementAddResult =
+            sendAddBatch(
+                viewer,
+                replacementAdds
+            );
+
+        recordAddBatch(
+            replacementAddResult
+        );
+
+        recordFailures(
+            removeResult,
+            "REMOVE"
+        );
+
+        recordFailures(
+            updateResult,
+            "UPDATE"
+        );
+
+        recordFailures(
+            pureAddResult,
+            "ADD"
+        );
+
+        recordFailures(
+            replacementAddResult,
+            "REPLACE_ADD"
+        );
+
+        List<VirtualEntry> next =
+            new ArrayList<VirtualEntry>(
+                max
             );
 
         for (int index = 0;
@@ -484,28 +803,77 @@ public final class VirtualTabService {
                 index++) {
 
             VirtualEntry old =
-                index < previous.size()
-                    ? previous.get(index)
-                    : null;
+                getEntry(
+                    previous,
+                    index
+                );
+
+            VirtualEntry wanted =
+                getEntry(
+                    desired,
+                    index
+                );
+
+            OperationKind operation =
+                operations[index];
+
+            VirtualEntry synchronizedEntry =
+                resolveSynchronizedEntry(
+                    operation,
+                    old,
+                    wanted,
+                    removeResult,
+                    updateResult,
+                    pureAddResult,
+                    replacementAddResult
+                );
+
+            next.add(
+                synchronizedEntry
+            );
+        }
+
+        totalRetryEntries +=
+            countRetryEntries(
+                operations,
+                previous,
+                desired,
+                removeResult,
+                updateResult,
+                pureAddResult,
+                replacementAddResult
+            );
+
+        trimTrailingNulls(
+            next
+        );
+
+        cache.put(
+            viewer.getUniqueId(),
+            next
+        );
+    }
+
+    private List<VirtualEntry> buildDesiredEntries(
+            Player viewer,
+            List<RenderedVirtualCell> rendered,
+            SkinPreview skinPreview) {
+
+        List<VirtualEntry> desired =
+            new ArrayList<VirtualEntry>(
+                rendered.size()
+            );
+
+        for (int index = 0;
+                index < rendered.size();
+                index++) {
 
             RenderedVirtualCell cell =
-                index < rendered.size()
-                    ? rendered.get(index)
-                    : null;
+                rendered.get(index);
 
             if (cell == null) {
 
-                if (old != null) {
-
-                    safeRemove(
-                        viewer,
-                        old
-                    );
-
-                    lastRemoves++;
-                totalRemoves++;
-                }
-
+                desired.add(null);
                 continue;
             }
 
@@ -525,98 +893,139 @@ public final class VirtualTabService {
                     skinId
                 );
 
-            if (old == null) {
-
-                VirtualEntry entry =
-                    createEntry(
-                        viewer,
-                        index,
-                        cell.getText(),
-                        skin
-                    );
-
-                safeAdd(
+            desired.add(
+                createEntry(
                     viewer,
-                    entry
-                );
-
-                lastAdds++;
-                totalAdds++;
-
-                next.add(
-                    entry
-                );
-
-                continue;
-            }
-
-            boolean skinChanged =
-                !skin.getCacheKey()
-                    .equals(
-                        old.getSkin()
-                            .getCacheKey()
-                    );
-
-            if (skinChanged) {
-
-                safeRemove(
-                    viewer,
-                    old
-                );
-
-                lastRemoves++;
-                totalRemoves++;
-
-                VirtualEntry replacement =
-                    createEntry(
-                        viewer,
-                        index,
-                        cell.getText(),
-                        skin
-                    );
-
-                safeAdd(
-                    viewer,
-                    replacement
-                );
-
-                lastAdds++;
-                totalAdds++;
-
-                next.add(
-                    replacement
-                );
-
-                continue;
-            }
-
-            if (!cell.getText()
-                    .equals(
-                        old.getDisplayName()
-                    )) {
-
-                old.setDisplayName(
-                    cell.getText()
-                );
-
-                safeUpdate(
-                    viewer,
-                    old
-                );
-
-                lastUpdates++;
-                totalUpdates++;
-            }
-
-            next.add(
-                old
+                    index,
+                    cell.getText(),
+                    skin
+                )
             );
         }
 
-        cache.put(
-            viewer.getUniqueId(),
-            next
-        );
+        return desired;
+    }
+
+    private VirtualEntry resolveSynchronizedEntry(
+            OperationKind operation,
+            VirtualEntry old,
+            VirtualEntry wanted,
+            PacketBatchResult removeResult,
+            PacketBatchResult updateResult,
+            PacketBatchResult pureAddResult,
+            PacketBatchResult replacementAddResult) {
+
+        if (operation == null
+                || operation == OperationKind.NONE) {
+
+            return old != null
+                ? old
+                : wanted;
+        }
+
+        if (operation == OperationKind.ADD) {
+
+            return pureAddResult.wasSuccessful(
+                    wanted)
+                ? wanted
+                : null;
+        }
+
+        if (operation == OperationKind.UPDATE) {
+
+            return updateResult.wasSuccessful(
+                    wanted)
+                ? wanted
+                : old;
+        }
+
+        if (operation == OperationKind.REMOVE) {
+
+            return removeResult.wasSuccessful(
+                    old)
+                ? null
+                : old;
+        }
+
+        if (operation == OperationKind.REPLACE) {
+
+            if (!removeResult.wasSuccessful(
+                    old)) {
+
+                return old;
+            }
+
+            return replacementAddResult.wasSuccessful(
+                    wanted)
+                ? wanted
+                : null;
+        }
+
+        return old;
+    }
+
+    private long countRetryEntries(
+            OperationKind[] operations,
+            List<VirtualEntry> previous,
+            List<VirtualEntry> desired,
+            PacketBatchResult removeResult,
+            PacketBatchResult updateResult,
+            PacketBatchResult pureAddResult,
+            PacketBatchResult replacementAddResult) {
+
+        long retries =
+            0L;
+
+        for (int index = 0;
+                index < operations.length;
+                index++) {
+
+            OperationKind operation =
+                operations[index];
+
+            VirtualEntry old =
+                getEntry(
+                    previous,
+                    index
+                );
+
+            VirtualEntry wanted =
+                getEntry(
+                    desired,
+                    index
+                );
+
+            if (operation == OperationKind.ADD
+                    && !pureAddResult.wasSuccessful(
+                        wanted)) {
+
+                retries++;
+
+            } else if (operation == OperationKind.UPDATE
+                    && !updateResult.wasSuccessful(
+                        wanted)) {
+
+                retries++;
+
+            } else if (operation == OperationKind.REMOVE
+                    && !removeResult.wasSuccessful(
+                        old)) {
+
+                retries++;
+
+            } else if (operation == OperationKind.REPLACE) {
+
+                if (!removeResult.wasSuccessful(
+                        old)
+                        || !replacementAddResult.wasSuccessful(
+                            wanted)) {
+
+                    retries++;
+                }
+            }
+        }
+
+        return retries;
     }
 
     private VirtualEntry createEntry(
@@ -674,64 +1083,144 @@ public final class VirtualTabService {
         );
     }
 
-    private void safeAdd(
+    private PacketBatchResult sendAddBatch(
             Player viewer,
-            VirtualEntry entry) {
+            List<VirtualEntry> entries) {
 
-        try {
+        return packetSender.addBatch(
+            viewer,
+            entries,
+            batchSize(
+                config.isPerformancePacketBatchAdd()
+            )
+        );
+    }
 
-            packetSender.add(
-                viewer,
-                entry
-            );
+    private PacketBatchResult sendUpdateBatch(
+            Player viewer,
+            List<VirtualEntry> entries) {
 
-        } catch (RuntimeException failure) {
+        return packetSender.updateBatch(
+            viewer,
+            entries,
+            batchSize(
+                config.isPerformancePacketBatchUpdate()
+            )
+        );
+    }
 
-            plugin.getLogger()
-                .warning(
-                    failure.getMessage()
-                );
+    private PacketBatchResult sendRemoveBatch(
+            Player viewer,
+            List<VirtualEntry> entries) {
+
+        return packetSender.removeBatch(
+            viewer,
+            entries,
+            batchSize(
+                config.isPerformancePacketBatchRemove()
+            )
+        );
+    }
+
+    private int batchSize(
+            boolean actionEnabled) {
+
+        if (!config.isPerformancePacketBatchingEnabled()
+                || !actionEnabled) {
+
+            return 1;
+        }
+
+        return config
+            .getPerformancePacketMaxEntriesPerPacket();
+    }
+
+    private void recordAddBatch(
+            PacketBatchResult result) {
+
+        if (result != null) {
+            totalAddPackets += result.getPacketsSent();
         }
     }
 
-    private void safeUpdate(
-            Player viewer,
-            VirtualEntry entry) {
+    private void recordUpdateBatch(
+            PacketBatchResult result) {
 
-        try {
-
-            packetSender.update(
-                viewer,
-                entry
-            );
-
-        } catch (RuntimeException failure) {
-
-            plugin.getLogger()
-                .warning(
-                    failure.getMessage()
-                );
+        if (result != null) {
+            totalUpdatePackets += result.getPacketsSent();
         }
     }
 
-    private void safeRemove(
-            Player viewer,
-            VirtualEntry entry) {
+    private void recordRemoveBatch(
+            PacketBatchResult result) {
 
-        try {
-
-            packetSender.remove(
-                viewer,
-                entry
-            );
-
-        } catch (RuntimeException failure) {
-
-            plugin.getLogger()
-                .warning(
-                    failure.getMessage()
-                );
+        if (result != null) {
+            totalRemovePackets += result.getPacketsSent();
         }
+    }
+
+    private void recordFailures(
+            PacketBatchResult result,
+            String action) {
+
+        if (result == null
+                || result.getPacketsFailed() <= 0) {
+
+            return;
+        }
+
+        totalPacketFailures +=
+            result.getPacketsFailed();
+
+        if (!shouldLogPacketFailure()) {
+            return;
+        }
+
+        plugin.getLogger().warning(
+            "V9.3 PlayerInfo batch "
+                + action
+                + " : "
+                + result.getPacketsFailed()
+                + " packet(s) en échec, "
+                + result.getSuccessfulEntries()
+                + "/"
+                + result.getAttemptedEntries()
+                + " entrée(s) synchronisée(s)."
+                + (result.getLastError().isEmpty()
+                    ? ""
+                    : " Dernière erreur: "
+                        + result.getLastError())
+        );
+    }
+
+    private boolean shouldLogPacketFailure() {
+
+        long now =
+            System.currentTimeMillis();
+
+        long intervalMillis =
+            Math.max(
+                0L,
+                config.getPerformancePacketFailureLogIntervalTicks()
+            ) * 50L;
+
+        if (intervalMillis <= 0L
+                || now - lastPacketFailureLogMillis
+                    >= intervalMillis) {
+
+            lastPacketFailureLogMillis =
+                now;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private void resetLastOperations() {
+        lastAdds = 0;
+        lastUpdates = 0;
+        lastRemoves = 0;
     }
 
     private SkinPreview getActivePreview(
@@ -789,6 +1278,73 @@ public final class VirtualTabService {
         }
     }
 
+    private static VirtualEntry getEntry(
+            List<VirtualEntry> entries,
+            int index) {
+
+        if (entries == null
+                || index < 0
+                || index >= entries.size()) {
+
+            return null;
+        }
+
+        return entries.get(index);
+    }
+
+    private static List<VirtualEntry> nonNullEntries(
+            List<VirtualEntry> entries) {
+
+        List<VirtualEntry> result =
+            new ArrayList<VirtualEntry>();
+
+        if (entries == null) {
+            return result;
+        }
+
+        for (VirtualEntry entry : entries) {
+
+            if (entry != null) {
+                result.add(entry);
+            }
+        }
+
+        return result;
+    }
+
+    private static int countOperations(
+            OperationKind[] operations,
+            OperationKind expected) {
+
+        int count =
+            0;
+
+        for (OperationKind operation : operations) {
+
+            if (operation == expected) {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static void trimTrailingNulls(
+            List<VirtualEntry> entries) {
+
+        for (int index =
+                entries.size() - 1;
+                index >= 0;
+                index--) {
+
+            if (entries.get(index) != null) {
+                return;
+            }
+
+            entries.remove(index);
+        }
+    }
+
     private static final class SkinPreview {
 
         private final String skinId;
@@ -806,6 +1362,14 @@ public final class VirtualTabService {
             this.expiresAtMillis =
                 expiresAtMillis;
         }
+    }
+
+    private enum OperationKind {
+        NONE,
+        ADD,
+        UPDATE,
+        REMOVE,
+        REPLACE
     }
 
     private static String leftPad(

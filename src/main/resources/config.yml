@@ -245,6 +245,40 @@ performance:
           ttl_ticks: 40
 
 
+  # -------------------------------------------------------------------
+  # PLAYERINFO PACKETS / BATCHING V9.3
+  # -------------------------------------------------------------------
+  #
+  # Le layout 3x15 contient 45 fake entries. Sans batching, la première
+  # synchronisation peut demander jusqu'à 45 ADD_PLAYER distincts.
+  # V9.3 regroupe les entrées d'une même action dans un seul packet.
+  #
+  packets:
+
+    batching:
+
+      # Master switch du batching virtuel.
+      enabled: true
+
+      # Permet de désactiver une action individuellement pour diagnostic.
+      add: true
+      update: true
+      remove: true
+
+      # Minecraft 1.8 accepte plusieurs PlayerInfoData dans un même packet.
+      # 80 = taille maximale du TAB client, donc un layout entier tient dans
+      # un seul packet par action.
+      max_entries_per_packet: 80
+
+    # En cas d'erreur réflexion/NMS, Ktab garde uniquement les opérations
+    # réellement synchronisées dans son cache. Les autres seront retentées
+    # naturellement au prochain refresh.
+    #
+    # Limite simplement le spam console si une incompatibilité apparaît.
+    # 100 ticks = 5 secondes. 0 = log chaque échec.
+    failure_log_interval_ticks: 100
+
+
 # =====================================================================
 # SKINS / CUSTOM HEADS
 # =====================================================================

@@ -1,0 +1,23 @@
+# Ktab V9.3 — Exemple Packet Batching
+
+performance:
+
+  packets:
+
+    batching:
+      enabled: true
+
+      # Chaque action peut être coupée séparément pour diagnostic.
+      add: true
+      update: true
+      remove: true
+
+      # Maximum Minecraft TAB = 80 entrées.
+      # Avec un layout Volkaria 3x15 (45), un refresh complet d'une action
+      # tient donc dans un seul PacketPlayOutPlayerInfo.
+      max_entries_per_packet: 80
+
+    # Throttle des erreurs packet/NMS.
+    # 100 ticks = 5 secondes.
+    # 0 = aucune limitation des logs d'erreur.
+    failure_log_interval_ticks: 100

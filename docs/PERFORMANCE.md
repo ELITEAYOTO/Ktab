@@ -334,3 +334,77 @@ Pour vider le cache sans redémarrer :
 ```text
 /ktab perf clearcache
 ```
+
+## V9.3 — PlayerInfo Packet Batching & Retry-safe diff
+
+V9.3 conserve les opérations logiques par cellule, mais regroupe les entrées
+ayant la même action PlayerInfo dans un nombre minimal de packets.
+
+Exemple lors de la première ouverture d'un layout 3x15 :
+
+```text
+45 nouvelles fake entries
+
+V9.2 :
+45 opérations ADD
+≈ 45 PacketPlayOutPlayerInfo
+
+V9.3 :
+45 opérations ADD
+= 1 PacketPlayOutPlayerInfo contenant 45 PlayerInfoData
+```
+
+Configuration :
+
+```yaml
+performance:
+  packets:
+    batching:
+      enabled: true
+      add: true
+      update: true
+      remove: true
+      max_entries_per_packet: 80
+
+    failure_log_interval_ticks: 100
+```
+
+Chaque action peut être désactivée séparément pour diagnostic. Si le master
+`enabled` est faux, Ktab retombe sur une entrée par packet sans modifier le
+reste de l'architecture V9.
+
+### Fiabilité du cache
+
+Le cache virtuel n'est plus mis à jour avant de savoir si l'invocation du
+packet a réussi.
+
+```text
+rendu désiré
+  ↓
+diff
+  ↓
+batch REMOVE / UPDATE / ADD
+  ↓
+succès par chunk
+  ↓
+cache = uniquement état synchronisé
+```
+
+Ainsi, une opération échouée reste naturellement à refaire au prochain passage
+du scheduler. Pour une skin remplacée, l'ADD de remplacement n'est envoyé que
+si le REMOVE de l'ancien profil a réussi.
+
+### Métriques
+
+`/ktab perf` distingue maintenant :
+
+```text
+Virtual entry ops       -> nombre de cellules logiquement modifiées
+Virtual network         -> nombre de packets réellement envoyés
+ops/packet              -> taux de compression du batching
+failures                -> packets en échec
+retry entries           -> cellules laissées dirty pour un prochain refresh
+```
+
+Sur un premier rendu 45 cellules, une valeur proche de `45 ops/packet` est le
+cas idéal pour l'action ADD.

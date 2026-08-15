@@ -655,7 +655,7 @@ public final class KtabCommand
         );
 
         sender.sendMessage(
-            "§7Virtual packets ops: §a+"
+            "§7Virtual entry ops: §a+"
                 + virtualTabService
                     .getTotalAdds()
                 + " §e~"
@@ -664,6 +664,40 @@ public final class KtabCommand
                 + " §c-"
                 + virtualTabService
                     .getTotalRemoves()
+        );
+
+        sender.sendMessage(
+            "§7Virtual network: §a+"
+                + virtualTabService
+                    .getTotalAddPackets()
+                + " §e~"
+                + virtualTabService
+                    .getTotalUpdatePackets()
+                + " §c-"
+                + virtualTabService
+                    .getTotalRemovePackets()
+                + " §8| §7ops/packet=§f"
+                + formatMillis(
+                    virtualTabService
+                        .getPacketCompressionRatio()
+                )
+        );
+
+        sender.sendMessage(
+            "§7Packet batching: "
+                + yn(
+                    config
+                        .isPerformancePacketBatchingEnabled()
+                )
+                + " §8| §7max=§f"
+                + config
+                    .getPerformancePacketMaxEntriesPerPacket()
+                + " §8| §7failures=§c"
+                + virtualTabService
+                    .getTotalPacketFailures()
+                + " §8| §7retry entries=§e"
+                + virtualTabService
+                    .getTotalRetryEntries()
         );
 
         sender.sendMessage(

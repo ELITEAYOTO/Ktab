@@ -3,6 +3,9 @@ package me.krunsh.ktab.packet;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -14,7 +17,12 @@ import me.krunsh.ktab.skin.ResolvedTabSkin;
 /**
  * Couche packet des entrées virtuelles du TAB 1.8.8.
  *
- * Les textures sont injectées dans le GameProfile avant ADD_PLAYER.
+ * V9.3 :
+ * - ADD / UPDATE / REMOVE batchables ;
+ * - découpage configurable par nombre maximal d'entrées/packet ;
+ * - constructeurs/champs/méthodes NMS mis en cache ;
+ * - sélection du constructeur PlayerInfoData par types et non uniquement
+ *   par nombre de paramètres.
  */
 public final class VirtualTabPacketSender {
 
@@ -24,16 +32,28 @@ public final class VirtualTabPacketSender {
     private final Class<?> actionClass;
     private final Class<?> dataClass;
     private final Class<?> gameProfileClass;
+    private final Class<?> propertyClass;
     private final Class<?> gamemodeClass;
+    private final Class<?> chatComponentClass;
     private final Class<?> packetInterface;
+
+    private final Constructor<?> packetConstructor;
+    private final Constructor<?> gameProfileConstructor;
+    private final Constructor<?> propertyConstructor;
+    private final Constructor<?> signedPropertyConstructor;
+    private final Constructor<?> playerInfoDataConstructor;
+    private final boolean playerInfoDataNeedsOuterPacket;
 
     private final Field actionField;
     private final Field listField;
+    private final Field playerConnectionField;
 
     private final Method chatParseMethod;
-
-    private final Class<?> craftPlayerClass;
     private final Method getHandleMethod;
+    private final Method sendPacketMethod;
+    private final Method gameProfileGetPropertiesMethod;
+
+    private final Object survivalGamemode;
 
     public VirtualTabPacketSender() {
 
@@ -76,11 +96,23 @@ public final class VirtualTabPacketSender {
                     "com.mojang.authlib.GameProfile"
                 );
 
+            propertyClass =
+                Class.forName(
+                    "com.mojang.authlib.properties.Property"
+                );
+
             gamemodeClass =
                 Class.forName(
                     "net.minecraft.server."
                         + nmsVersion
                         + ".WorldSettings$EnumGamemode"
+                );
+
+            chatComponentClass =
+                Class.forName(
+                    "net.minecraft.server."
+                        + nmsVersion
+                        + ".IChatBaseComponent"
                 );
 
             packetInterface =
@@ -89,6 +121,55 @@ public final class VirtualTabPacketSender {
                         + nmsVersion
                         + ".Packet"
                 );
+
+            Class<?> entityPlayerClass =
+                Class.forName(
+                    "net.minecraft.server."
+                        + nmsVersion
+                        + ".EntityPlayer"
+                );
+
+            Class<?> playerConnectionClass =
+                Class.forName(
+                    "net.minecraft.server."
+                        + nmsVersion
+                        + ".PlayerConnection"
+                );
+
+            packetConstructor =
+                packetClass.getDeclaredConstructor();
+
+            packetConstructor.setAccessible(
+                true
+            );
+
+            gameProfileConstructor =
+                gameProfileClass.getConstructor(
+                    UUID.class,
+                    String.class
+                );
+
+            propertyConstructor =
+                propertyClass.getConstructor(
+                    String.class,
+                    String.class
+                );
+
+            signedPropertyConstructor =
+                propertyClass.getConstructor(
+                    String.class,
+                    String.class,
+                    String.class
+                );
+
+            ConstructorSelection selection =
+                findPlayerInfoDataConstructor();
+
+            playerInfoDataConstructor =
+                selection.constructor;
+
+            playerInfoDataNeedsOuterPacket =
+                selection.needsOuterPacket;
 
             actionField =
                 findField(
@@ -124,7 +205,7 @@ public final class VirtualTabPacketSender {
                     String.class
                 );
 
-            craftPlayerClass =
+            Class<?> craftPlayerClass =
                 Class.forName(
                     "org.bukkit.craftbukkit."
                         + nmsVersion
@@ -134,6 +215,28 @@ public final class VirtualTabPacketSender {
             getHandleMethod =
                 craftPlayerClass.getMethod(
                     "getHandle"
+                );
+
+            playerConnectionField =
+                entityPlayerClass.getField(
+                    "playerConnection"
+                );
+
+            sendPacketMethod =
+                playerConnectionClass.getMethod(
+                    "sendPacket",
+                    packetInterface
+                );
+
+            gameProfileGetPropertiesMethod =
+                gameProfileClass.getMethod(
+                    "getProperties"
+                );
+
+            survivalGamemode =
+                enumValue(
+                    gamemodeClass,
+                    "SURVIVAL"
                 );
 
         } catch (Exception failure) {
@@ -149,15 +252,58 @@ public final class VirtualTabPacketSender {
         return nmsVersion;
     }
 
+    public PacketBatchResult addBatch(
+            Player viewer,
+            Collection<VirtualEntry> entries,
+            int maxEntriesPerPacket) {
+
+        return sendBatch(
+            viewer,
+            "ADD_PLAYER",
+            entries,
+            maxEntriesPerPacket,
+            true
+        );
+    }
+
+    public PacketBatchResult updateBatch(
+            Player viewer,
+            Collection<VirtualEntry> entries,
+            int maxEntriesPerPacket) {
+
+        return sendBatch(
+            viewer,
+            "UPDATE_DISPLAY_NAME",
+            entries,
+            maxEntriesPerPacket,
+            true
+        );
+    }
+
+    public PacketBatchResult removeBatch(
+            Player viewer,
+            Collection<VirtualEntry> entries,
+            int maxEntriesPerPacket) {
+
+        return sendBatch(
+            viewer,
+            "REMOVE_PLAYER",
+            entries,
+            maxEntriesPerPacket,
+            false
+        );
+    }
+
     public void add(
             Player viewer,
             VirtualEntry entry) {
 
-        send(
+        addBatch(
             viewer,
-            "ADD_PLAYER",
-            entry,
-            entry.getDisplayName()
+            Collections.singletonList(
+                entry
+            ),
+            1
         );
     }
 
@@ -165,11 +311,12 @@ public final class VirtualTabPacketSender {
             Player viewer,
             VirtualEntry entry) {
 
-        send(
+        updateBatch(
             viewer,
-            "UPDATE_DISPLAY_NAME",
-            entry,
-            entry.getDisplayName()
+            Collections.singletonList(
+                entry
+            ),
+            1
         );
     }
 
@@ -177,51 +324,102 @@ public final class VirtualTabPacketSender {
             Player viewer,
             VirtualEntry entry) {
 
-        send(
+        removeBatch(
             viewer,
-            "REMOVE_PLAYER",
-            entry,
-            null
+            Collections.singletonList(
+                entry
+            ),
+            1
         );
     }
 
-    private void send(
+    private PacketBatchResult sendBatch(
             Player viewer,
             String actionName,
-            VirtualEntry entry,
-            String displayName) {
+            Collection<VirtualEntry> source,
+            int maxEntriesPerPacket,
+            boolean includeDisplayName) {
+
+        PacketBatchResult result =
+            new PacketBatchResult();
 
         if (viewer == null
                 || !viewer.isOnline()
-                || entry == null) {
+                || source == null
+                || source.isEmpty()) {
 
-            return;
+            return result;
         }
 
-        try {
+        List<VirtualEntry> entries =
+            new ArrayList<VirtualEntry>();
 
-            Object packet =
-                createPacket(
-                    actionName,
-                    entry,
-                    displayName
+        for (VirtualEntry entry : source) {
+
+            if (entry != null) {
+                entries.add(entry);
+            }
+        }
+
+        if (entries.isEmpty()) {
+            return result;
+        }
+
+        int chunkSize =
+            Math.max(
+                1,
+                Math.min(
+                    80,
+                    maxEntriesPerPacket
+                )
+            );
+
+        for (int start = 0;
+                start < entries.size();
+                start += chunkSize) {
+
+            int end =
+                Math.min(
+                    entries.size(),
+                    start + chunkSize
                 );
 
-            sendPacket(
-                viewer,
-                packet
-            );
+            List<VirtualEntry> chunk =
+                new ArrayList<VirtualEntry>(
+                    entries.subList(
+                        start,
+                        end
+                    )
+                );
 
-        } catch (Exception failure) {
+            try {
 
-            throw new IllegalStateException(
-                "Packet "
-                    + actionName
-                    + " impossible pour "
-                    + viewer.getName(),
-                failure
-            );
+                Object packet =
+                    createPacket(
+                        actionName,
+                        chunk,
+                        includeDisplayName
+                    );
+
+                sendPacket(
+                    viewer,
+                    packet
+                );
+
+                result.recordSuccess(
+                    chunk
+                );
+
+            } catch (Exception failure) {
+
+                result.recordFailure(
+                    chunk,
+                    failure
+                );
+            }
         }
+
+        return result;
     }
 
     @SuppressWarnings({
@@ -230,16 +428,9 @@ public final class VirtualTabPacketSender {
     })
     private Object createPacket(
             String actionName,
-            VirtualEntry entry,
-            String displayName)
+            List<VirtualEntry> entries,
+            boolean includeDisplayName)
             throws Exception {
-
-        Constructor<?> packetConstructor =
-            packetClass.getDeclaredConstructor();
-
-        packetConstructor.setAccessible(
-            true
-        );
 
         Object packet =
             packetConstructor.newInstance();
@@ -265,21 +456,22 @@ public final class VirtualTabPacketSender {
 
         data.clear();
 
-        data.add(
-            createPlayerInfoData(
-                packet,
-                entry,
-                displayName
-            )
-        );
+        for (VirtualEntry entry : entries) {
+
+            data.add(
+                createPlayerInfoData(
+                    packet,
+                    entry,
+                    includeDisplayName
+                        ? entry.getDisplayName()
+                        : null
+                )
+            );
+        }
 
         return packet;
     }
 
-    @SuppressWarnings({
-        "unchecked",
-        "rawtypes"
-    })
     private Object createPlayerInfoData(
             Object packet,
             VirtualEntry entry,
@@ -287,29 +479,15 @@ public final class VirtualTabPacketSender {
             throws Exception {
 
         Object profile =
-            gameProfileClass
-                .getConstructor(
-                    UUID.class,
-                    String.class
-                )
-                .newInstance(
-                    entry.getUuid(),
-                    entry.getTechnicalName()
-                );
+            gameProfileConstructor.newInstance(
+                entry.getUuid(),
+                entry.getTechnicalName()
+            );
 
         applySkin(
             profile,
             entry.getSkin()
         );
-
-        Object gamemode =
-            Enum.valueOf(
-                (Class<Enum>)
-                    gamemodeClass.asSubclass(
-                        Enum.class
-                    ),
-                "SURVIVAL"
-            );
 
         Object component =
             displayName == null
@@ -318,41 +496,22 @@ public final class VirtualTabPacketSender {
                     displayName
                 );
 
-        for (Constructor<?> constructor
-                : dataClass
-                    .getDeclaredConstructors()) {
+        if (playerInfoDataNeedsOuterPacket) {
 
-            Class<?>[] types =
-                constructor.getParameterTypes();
-
-            constructor.setAccessible(
-                true
+            return playerInfoDataConstructor.newInstance(
+                packet,
+                profile,
+                Integer.valueOf(0),
+                survivalGamemode,
+                component
             );
-
-            if (types.length == 5) {
-
-                return constructor.newInstance(
-                    packet,
-                    profile,
-                    Integer.valueOf(0),
-                    gamemode,
-                    component
-                );
-            }
-
-            if (types.length == 4) {
-
-                return constructor.newInstance(
-                    profile,
-                    Integer.valueOf(0),
-                    gamemode,
-                    component
-                );
-            }
         }
 
-        throw new NoSuchMethodException(
-            "Constructeur PlayerInfoData introuvable."
+        return playerInfoDataConstructor.newInstance(
+            profile,
+            Integer.valueOf(0),
+            survivalGamemode,
+            component
         );
     }
 
@@ -368,52 +527,22 @@ public final class VirtualTabPacketSender {
             return;
         }
 
-        Method getProperties =
-            profile.getClass()
-                .getMethod(
-                    "getProperties"
-                );
-
         Object properties =
-            getProperties.invoke(
+            gameProfileGetPropertiesMethod.invoke(
                 profile
             );
 
-        Class<?> propertyClass =
-            Class.forName(
-                "com.mojang.authlib.properties.Property"
-            );
-
-        Object property;
-
-        if (skin.hasSignature()) {
-
-            property =
-                propertyClass
-                    .getConstructor(
-                        String.class,
-                        String.class,
-                        String.class
-                    )
-                    .newInstance(
-                        "textures",
-                        skin.getValue(),
-                        skin.getSignature()
-                    );
-
-        } else {
-
-            property =
-                propertyClass
-                    .getConstructor(
-                        String.class,
-                        String.class
-                    )
-                    .newInstance(
-                        "textures",
-                        skin.getValue()
-                    );
-        }
+        Object property =
+            skin.hasSignature()
+                ? signedPropertyConstructor.newInstance(
+                    "textures",
+                    skin.getValue(),
+                    skin.getSignature()
+                )
+                : propertyConstructor.newInstance(
+                    "textures",
+                    skin.getValue()
+                );
 
         Method put =
             findPutMethod(
@@ -427,29 +556,77 @@ public final class VirtualTabPacketSender {
         );
     }
 
-    private static Method findPutMethod(
-            Object properties)
+    private ConstructorSelection findPlayerInfoDataConstructor()
             throws NoSuchMethodException {
 
-        for (Method method
-                : properties.getClass()
-                    .getMethods()) {
+        for (Constructor<?> constructor
+                : dataClass.getDeclaredConstructors()) {
 
-            if (!"put".equals(
-                    method.getName())
-                    || method
-                        .getParameterTypes()
-                        .length != 2) {
+            Class<?>[] types =
+                constructor.getParameterTypes();
 
-                continue;
+            if (types.length == 5
+                    && packetClass.isAssignableFrom(
+                        types[0]
+                    )
+                    && gameProfileClass.isAssignableFrom(
+                        types[1]
+                    )
+                    && isIntType(
+                        types[2]
+                    )
+                    && gamemodeClass.isAssignableFrom(
+                        types[3]
+                    )
+                    && chatComponentClass.isAssignableFrom(
+                        types[4]
+                    )) {
+
+                constructor.setAccessible(
+                    true
+                );
+
+                return new ConstructorSelection(
+                    constructor,
+                    true
+                );
             }
 
-            return method;
+            if (types.length == 4
+                    && gameProfileClass.isAssignableFrom(
+                        types[0]
+                    )
+                    && isIntType(
+                        types[1]
+                    )
+                    && gamemodeClass.isAssignableFrom(
+                        types[2]
+                    )
+                    && chatComponentClass.isAssignableFrom(
+                        types[3]
+                    )) {
+
+                constructor.setAccessible(
+                    true
+                );
+
+                return new ConstructorSelection(
+                    constructor,
+                    false
+                );
+            }
         }
 
         throw new NoSuchMethodException(
-            "PropertyMap.put introuvable."
+            "Constructeur PlayerInfoData 1.8 compatible introuvable."
         );
+    }
+
+    private static boolean isIntType(
+            Class<?> type) {
+
+        return type == Integer.TYPE
+            || type == Integer.class;
     }
 
     private Object chatComponent(
@@ -479,24 +656,37 @@ public final class VirtualTabPacketSender {
             );
 
         Object connection =
-            handle.getClass()
-                .getField(
-                    "playerConnection"
-                )
-                .get(
-                    handle
-                );
+            playerConnectionField.get(
+                handle
+            );
 
-        Method sendPacket =
-            connection.getClass()
-                .getMethod(
-                    "sendPacket",
-                    packetInterface
-                );
-
-        sendPacket.invoke(
+        sendPacketMethod.invoke(
             connection,
             packet
+        );
+    }
+
+    private static Method findPutMethod(
+            Object properties)
+            throws NoSuchMethodException {
+
+        for (Method method
+                : properties.getClass()
+                    .getMethods()) {
+
+            if (!"put".equals(
+                    method.getName())
+                    || method.getParameterTypes()
+                        .length != 2) {
+
+                continue;
+            }
+
+            return method;
+        }
+
+        throw new NoSuchMethodException(
+            "PropertyMap.put introuvable."
         );
     }
 
@@ -513,10 +703,9 @@ public final class VirtualTabPacketSender {
                     fallbackName
                 );
 
-            if (expectedType
-                    .isAssignableFrom(
-                        field.getType()
-                    )) {
+            if (expectedType.isAssignableFrom(
+                    field.getType()
+                )) {
 
                 return field;
             }
@@ -527,10 +716,9 @@ public final class VirtualTabPacketSender {
         for (Field field
                 : owner.getDeclaredFields()) {
 
-            if (expectedType
-                    .isAssignableFrom(
-                        field.getType()
-                    )) {
+            if (expectedType.isAssignableFrom(
+                    field.getType()
+                )) {
 
                 return field;
             }
@@ -553,10 +741,9 @@ public final class VirtualTabPacketSender {
                     fallbackName
                 );
 
-            if (List.class
-                    .isAssignableFrom(
-                        field.getType()
-                    )) {
+            if (List.class.isAssignableFrom(
+                    field.getType()
+                )) {
 
                 return field;
             }
@@ -567,10 +754,9 @@ public final class VirtualTabPacketSender {
         for (Field field
                 : owner.getDeclaredFields()) {
 
-            if (List.class
-                    .isAssignableFrom(
-                        field.getType()
-                    )) {
+            if (List.class.isAssignableFrom(
+                    field.getType()
+                )) {
 
                 return field;
             }
@@ -578,6 +764,23 @@ public final class VirtualTabPacketSender {
 
         throw new NoSuchFieldException(
             fallbackName
+        );
+    }
+
+    @SuppressWarnings({
+        "unchecked",
+        "rawtypes"
+    })
+    private static Object enumValue(
+            Class<?> enumClass,
+            String name) {
+
+        return Enum.valueOf(
+            (Class<Enum>)
+                enumClass.asSubclass(
+                    Enum.class
+                ),
+            name
         );
     }
 
@@ -625,5 +828,19 @@ public final class VirtualTabPacketSender {
         }
 
         return builder.toString();
+    }
+
+    private static final class ConstructorSelection {
+
+        private final Constructor<?> constructor;
+        private final boolean needsOuterPacket;
+
+        private ConstructorSelection(
+                Constructor<?> constructor,
+                boolean needsOuterPacket) {
+
+            this.constructor = constructor;
+            this.needsOuterPacket = needsOuterPacket;
+        }
     }
 }

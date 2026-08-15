@@ -12,7 +12,7 @@ de KjobsUltimate : les données externes passent par **PlaceholderAPI**.
 - Header / footer personnalisables.
 - Layout virtuel jusqu'à 4 colonnes × 20 lignes.
 - Positionnement automatique ou exact avec `row: 1..20`.
-- Diff de packets :
+- Diff de packets + batching PlayerInfo V9.3 :
   - `ADD_PLAYER` uniquement pour une nouvelle entrée ;
   - `UPDATE_DISPLAY_NAME` si seul le texte change ;
   - `REMOVE_PLAYER + ADD_PLAYER` si la skin change.
@@ -391,7 +391,9 @@ docs/
 ├── config-v5-heads-example.yml
 ├── config-v7-layout-example.yml
 ├── config-v8-conditions-example.yml
-└── config-v9-performance-example.yml
+├── config-v9-performance-example.yml
+├── config-v9.2-placeholders-example.yml
+└── config-v9.3-packets-example.yml
 ```
 
 ## Compatibilité
@@ -407,3 +409,81 @@ Server:    PandaSpigot / KhopeSpigot
 
 La couche NMS est isolée dans les classes `packet/` afin de ne pas contaminer
 le renderer, la configuration ou les intégrations.
+
+
+
+## Performance V9
+
+Ktab V9 vise les fortes populations sans sacrifier la configuration YAML.
+
+### V9.1 — Scheduler réparti
+
+Le refresh n'est plus envoyé à tous les viewers le même tick.
+
+Avec :
+
+```yaml
+performance:
+  scheduler:
+    refresh_window_ticks: 40
+    max_viewers_per_tick: 25
+```
+
+700 joueurs correspondent à environ 18 viewers réguliers par tick.
+
+La visibilité des vrais joueurs est également événementielle afin d'éviter les
+anciens sweeps O(n²) sur chaque join/quit.
+
+### V9.2 — Placeholders compilés et snapshots
+
+```yaml
+performance:
+  placeholders:
+    compiled_templates: true
+    deduplicate: true
+
+    cache:
+      enabled: true
+      default_ttl_ticks: 40
+      max_entries_per_player: 64
+
+      rules:
+        - match: "%kjob_level_*%"
+          ttl_ticks: 60
+```
+
+Les textes YAML sont compilés une seule fois. Les placeholders répétés dans le
+header, footer, layout et conditions partagent ensuite le même cache par viewer.
+
+Les valeurs globales `%server_online%` et `%server_max_players%` viennent d'un
+snapshot global capturé une fois par tick.
+
+### V9.3 — Packet batching
+
+```yaml
+performance:
+  packets:
+    batching:
+      enabled: true
+      add: true
+      update: true
+      remove: true
+      max_entries_per_packet: 80
+```
+
+Les changements de fake entries sont d'abord regroupés par action. Un layout
+3x15 nouvellement créé peut donc envoyer 45 `PlayerInfoData` dans un seul
+`PacketPlayOutPlayerInfo ADD_PLAYER` au lieu d'un packet par cellule.
+
+Le cache est également retry-safe : une entrée n'est considérée synchronisée
+qu'après un envoi réussi. Les échecs restent à refaire au prochain refresh.
+
+Diagnostic :
+
+```text
+/ktab perf
+/ktab perf reset
+/ktab perf clearcache
+```
+
+Voir [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
