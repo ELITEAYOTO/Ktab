@@ -1,0 +1,97 @@
+# ============================================================
+# Ktab — Configuration
+# ============================================================
+
+enabled: true
+
+# Header/Footer.
+update_interval_ticks: 40
+placeholderapi: true
+
+header:
+  - "&6&lVOLKARIA"
+  - "&7Bienvenue &f%player_name%"
+
+footer:
+  - ""
+  - "&7Métier: &f%kjob_display_job_name%"
+  - "&7Niveau global: &e%kjob_global_level%"
+  - "&7Quêtes à récupérer: &a%kjob_claimable_quests%"
+
+# Le vrai pseudo du joueur peut être formaté séparément.
+# En 1.8, rester à 16 caractères max.
+player_list_name:
+  enabled: false
+  format: "&7%player_name%"
+  max_length: 16
+
+# ============================================================
+# LAYOUT VIRTUEL V2
+# ============================================================
+#
+# V2 conserve les vrais joueurs visibles et ajoute des entrées fake.
+# Le masquage des vrais joueurs sera ajouté seulement après validation de
+# cette couche packet/diff sur ton PandaSpigot.
+#
+virtual_layout:
+  enabled: false
+
+  update_interval_ticks: 40
+
+  # Minecraft 1.8 peut afficher jusqu'à 4 colonnes / 20 lignes.
+  columns_count: 3
+  rows: 15
+
+  # Plafond absolu d'entrées fake que Ktab peut créer.
+  max_entries: 44
+
+  # Réserve minimale pour les vrais joueurs.
+  reserve_real_entries: 1
+
+  # Réduit automatiquement les fake entries pour préserver la grille lorsque
+  # le nombre de vrais joueurs augmente.
+  force_client_rows: true
+
+  ordering:
+    technical_name_prefix: "!kt_"
+    stable_uuid_seed: "volkaria-ktab"
+    start_index: 1
+
+  render:
+    blank_text: "&8"
+    cell_prefix: ""
+    cell_suffix: ""
+
+  # L'ordre YAML = ordre des colonnes.
+  columns:
+
+    infos:
+      enabled: true
+      title: "&6&lVOLKARIA"
+      lines:
+        - "&7Joueur: &f%player_name%"
+        - "&7Métier: &e%kjob_display_job_name%"
+        - "&7Niveau global: &e%kjob_global_level%"
+        - ""
+        - "&7Slots: &f%kjob_slots_used%&8/&f%kjob_slots_unlocked%"
+        - "&7Quêtes: &a%kjob_claimable_quests%"
+
+    jobs:
+      enabled: true
+      title: "&e&lMÉTIERS"
+      lines:
+        - "&7Mineur: &fNv.%kjob_level_mineur%"
+        - "&7Farmer: &fNv.%kjob_level_farmer%"
+        - "&7Chasseur: &fNv.%kjob_level_hunter%"
+        - "&7Prétorien: &fNv.%kjob_level_pretorien%"
+        - "&7Artisan: &fNv.%kjob_level_artisan%"
+        - "&7Pilleur: &fNv.%kjob_level_pilleur%"
+
+    server:
+      enabled: true
+      title: "&b&lSERVEUR"
+      lines:
+        - "&7En ligne: &f%server_online%"
+        - "&7Ping: &f%player_ping%ms"
+        - ""
+        - "&7www.volkaria.fr"

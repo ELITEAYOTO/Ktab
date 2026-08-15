@@ -1,0 +1,19 @@
+name: Ktab
+version: ${project.version}
+main: me.krunsh.ktab.KtabPlugin
+description: Tablist configurable pour Volkaria
+author: krunsh
+
+depend:
+  - PlaceholderAPI
+
+commands:
+  ktab:
+    description: Administration de Ktab
+    usage: /ktab <reload|status>
+    permission: ktab.admin
+
+permissions:
+  ktab.admin:
+    description: Administrer Ktab
+    default: op
