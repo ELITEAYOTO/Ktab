@@ -2,10 +2,6 @@ package me.krunsh.ktab.layout;
 
 /**
  * Calcul pur du nombre maximum d'entrées virtuelles.
- *
- * Minecraft 1.8 affiche au maximum 80 entrées dans le TAB.
- * Le calcul réserve la place nécessaire aux vrais joueurs lorsque ceux-ci
- * restent visibles.
  */
 public final class PackedTabSizing {
 
@@ -18,15 +14,22 @@ public final class PackedTabSizing {
             int rows,
             int configuredMaximum,
             int configuredRealReserve,
-            int onlinePlayers) {
+            int onlinePlayers,
+            boolean hideRealPlayers) {
 
         int safeColumns =
-            Math.max(1, columns);
+            Math.max(
+                1,
+                columns
+            );
 
         int safeRows =
             Math.max(
                 1,
-                Math.min(20, rows)
+                Math.min(
+                    20,
+                    rows
+                )
             );
 
         int safeMaximum =
@@ -46,22 +49,25 @@ public final class PackedTabSizing {
             safeColumns * safeRows;
 
         int visibleRealPlayers =
-            Math.max(
-                Math.max(
-                    0,
-                    configuredRealReserve
-                ),
-                Math.max(
-                    0,
-                    onlinePlayers
-                )
-            );
+            hideRealPlayers
+                ? 0
+                : Math.max(
+                    Math.max(
+                        0,
+                        configuredRealReserve
+                    ),
+                    Math.max(
+                        0,
+                        onlinePlayers
+                    )
+                );
 
         return Math.max(
             0,
             Math.min(
                 safeMaximum,
-                totalCells - visibleRealPlayers
+                totalCells
+                    - visibleRealPlayers
             )
         );
     }

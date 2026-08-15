@@ -50,6 +50,10 @@ public final class KtabConfig {
     private List<TabColumn> virtualColumns =
         Collections.emptyList();
 
+    private boolean hideRealPlayers;
+    private boolean hideServerNpcs;
+    private long visibilityInitialDelayTicks;
+
     public KtabConfig(
             KtabPlugin plugin) {
 
@@ -254,6 +258,27 @@ public final class KtabConfig {
             loadColumns(
                 config
             );
+
+        hideRealPlayers =
+            config.getBoolean(
+                "visibility.hide_real_players",
+                true
+            );
+
+        hideServerNpcs =
+            config.getBoolean(
+                "visibility.hide_servernpc",
+                true
+            );
+
+        visibilityInitialDelayTicks =
+            Math.max(
+                1L,
+                config.getLong(
+                    "visibility.initial_hide_delay_ticks",
+                    20L
+                )
+            );
     }
 
     public boolean isEnabled() {
@@ -344,6 +369,18 @@ public final class KtabConfig {
         return virtualColumns;
     }
 
+    public boolean isHideRealPlayers() {
+        return hideRealPlayers;
+    }
+
+    public boolean isHideServerNpcs() {
+        return hideServerNpcs;
+    }
+
+    public long getVisibilityInitialDelayTicks() {
+        return visibilityInitialDelayTicks;
+    }
+
     private List<TabColumn> loadColumns(
             FileConfiguration config) {
 
@@ -405,7 +442,9 @@ public final class KtabConfig {
         }
 
         return Collections.unmodifiableList(
-            new ArrayList<String>(input)
+            new ArrayList<String>(
+                input
+            )
         );
     }
 
@@ -441,6 +480,7 @@ public final class KtabConfig {
         }
 
         if (value.length() > 12) {
+
             value =
                 value.substring(
                     0,

@@ -4,7 +4,6 @@
 
 enabled: true
 
-# Header/Footer.
 update_interval_ticks: 40
 placeholderapi: true
 
@@ -18,38 +17,48 @@ footer:
   - "&7Niveau global: &e%kjob_global_level%"
   - "&7Quêtes à récupérer: &a%kjob_claimable_quests%"
 
-# Le vrai pseudo du joueur peut être formaté séparément.
-# En 1.8, rester à 16 caractères max.
 player_list_name:
   enabled: false
   format: "&7%player_name%"
   max_length: 16
 
 # ============================================================
-# LAYOUT VIRTUEL V2
+# VISIBILITÉ DES ENTRÉES VANILLA / NPC
 # ============================================================
 #
-# V2 conserve les vrais joueurs visibles et ajoute des entrées fake.
-# Le masquage des vrais joueurs sera ajouté seulement après validation de
-# cette couche packet/diff sur ton PandaSpigot.
+# IMPORTANT :
+# ces options retirent uniquement les entrées du PlayerInfo/TAB.
+# Elles ne rendent PAS les joueurs ou NPC invisibles dans le monde.
 #
+visibility:
+
+  # Recommandé avec le layout virtuel.
+  # Empêche les vrais pseudos de prendre une cellule et de décaler les colonnes.
+  hide_real_players: true
+
+  # Hook optionnel sur le plugin "ServerNPC".
+  # Ktab lit ServerNPC.getAPI().getNPCList() puis retire leurs UUID du TAB.
+  hide_servernpc: true
+
+  # Laisse vanilla + ServerNPC terminer leur séquence de spawn/skin avant
+  # d'appliquer le premier nettoyage du TAB au join.
+  initial_hide_delay_ticks: 20
+
+# ============================================================
+# LAYOUT VIRTUEL
+# ============================================================
+
 virtual_layout:
-  enabled: false
+  enabled: true
 
   update_interval_ticks: 40
 
-  # Minecraft 1.8 peut afficher jusqu'à 4 colonnes / 20 lignes.
   columns_count: 3
   rows: 15
 
-  # Plafond absolu d'entrées fake que Ktab peut créer.
-  max_entries: 44
-
-  # Réserve minimale pour les vrais joueurs.
+  # Avec hide_real_players=true, la place des joueurs réels n'est plus réservée.
+  max_entries: 45
   reserve_real_entries: 1
-
-  # Réduit automatiquement les fake entries pour préserver la grille lorsque
-  # le nombre de vrais joueurs augmente.
   force_client_rows: true
 
   ordering:
@@ -58,11 +67,12 @@ virtual_layout:
     start_index: 1
 
   render:
-    blank_text: "&8"
+    # §8 directement plutôt que "&8" : les entrées de remplissage ne sont
+    # pas rerendues une deuxième fois après leur insertion.
+    blank_text: "§8"
     cell_prefix: ""
     cell_suffix: ""
 
-  # L'ordre YAML = ordre des colonnes.
   columns:
 
     infos:

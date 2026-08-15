@@ -18,15 +18,10 @@ import me.krunsh.ktab.layout.VirtualLayoutRenderer;
 import me.krunsh.ktab.packet.VirtualEntry;
 import me.krunsh.ktab.packet.VirtualTabPacketSender;
 import me.krunsh.ktab.render.PlaceholderRenderer;
+import me.krunsh.ktab.visibility.TabVisibilityController;
 
 /**
  * Service des entrées virtuelles du TAB.
- *
- * V3 :
- * - refresh ciblé ;
- * - refresh global immédiat après join/quit ;
- * - inspection du cache par viewer ;
- * - le diff ADD/UPDATE/REMOVE reste inchangé.
  */
 public final class VirtualTabService {
 
@@ -35,6 +30,7 @@ public final class VirtualTabService {
 
     private final VirtualLayoutRenderer layoutRenderer;
     private final VirtualTabPacketSender packetSender;
+    private final TabVisibilityController visibilityController;
 
     private final Map<UUID, List<VirtualEntry>> cache =
         new HashMap<UUID, List<VirtualEntry>>();
@@ -49,11 +45,13 @@ public final class VirtualTabService {
     public VirtualTabService(
             KtabPlugin plugin,
             KtabConfig config,
-            PlaceholderRenderer renderer) {
+            PlaceholderRenderer renderer,
+            TabVisibilityController visibilityController) {
 
         if (plugin == null
                 || config == null
-                || renderer == null) {
+                || renderer == null
+                || visibilityController == null) {
 
             throw new IllegalArgumentException(
                 "Dépendance VirtualTabService manquante."
@@ -62,6 +60,8 @@ public final class VirtualTabService {
 
         this.plugin = plugin;
         this.config = config;
+        this.visibilityController =
+            visibilityController;
 
         layoutRenderer =
             new VirtualLayoutRenderer(
@@ -173,11 +173,9 @@ public final class VirtualTabService {
                 viewer.getUniqueId()
             );
 
-        if (previous == null) {
-            return;
-        }
+        if (previous == null
+                || !viewer.isOnline()) {
 
-        if (!viewer.isOnline()) {
             return;
         }
 
@@ -234,7 +232,9 @@ public final class VirtualTabService {
         }
 
         List<VirtualEntry> entries =
-            cache.get(viewerId);
+            cache.get(
+                viewerId
+            );
 
         return entries == null
             ? 0
@@ -298,6 +298,15 @@ public final class VirtualTabService {
     private void updateViewer(
             Player viewer,
             int onlinePlayers) {
+
+        /*
+         * Important :
+         * on retire les vraies entrées / ServerNPC AVANT le diff Ktab,
+         * afin qu'elles ne puissent pas décaler la grille virtuelle.
+         */
+        visibilityController.apply(
+            viewer
+        );
 
         List<String> rendered =
             layoutRenderer.render(
@@ -386,7 +395,9 @@ public final class VirtualTabService {
                 lastUpdates++;
             }
 
-            next.add(entry);
+            next.add(
+                entry
+            );
         }
 
         cache.put(

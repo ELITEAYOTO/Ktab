@@ -10,30 +10,36 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import me.krunsh.ktab.KtabPlugin;
+import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.service.TabService;
 import me.krunsh.ktab.service.VirtualTabService;
+import me.krunsh.ktab.visibility.TabVisibilityController;
 
 /**
  * Lifecycle joueur Ktab.
- *
- * Le petit délai après join laisse Minecraft terminer l'ajout normal du joueur
- * au player-info avant d'envoyer les entrées virtuelles.
  */
 public final class KtabPlayerListener
         implements Listener {
 
     private final KtabPlugin plugin;
+    private final KtabConfig config;
+
     private final TabService tabService;
     private final VirtualTabService virtualTabService;
+    private final TabVisibilityController visibilityController;
 
     public KtabPlayerListener(
             KtabPlugin plugin,
+            KtabConfig config,
             TabService tabService,
-            VirtualTabService virtualTabService) {
+            VirtualTabService virtualTabService,
+            TabVisibilityController visibilityController) {
 
         if (plugin == null
+                || config == null
                 || tabService == null
-                || virtualTabService == null) {
+                || virtualTabService == null
+                || visibilityController == null) {
 
             throw new IllegalArgumentException(
                 "Dépendance KtabPlayerListener manquante."
@@ -41,8 +47,11 @@ public final class KtabPlayerListener
         }
 
         this.plugin = plugin;
+        this.config = config;
         this.tabService = tabService;
         this.virtualTabService = virtualTabService;
+        this.visibilityController =
+            visibilityController;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -73,21 +82,20 @@ public final class KtabPlayerListener
                             return;
                         }
 
-                        /*
-                         * Le nouveau joueur reçoit immédiatement son Header/Footer.
-                         */
                         tabService.refresh(
                             player
                         );
 
                         /*
-                         * Le nombre de vrais joueurs influence le nombre maximum
-                         * d'entrées fake : tous les viewers sont donc recalculés.
+                         * ServerNPC et le serveur vanilla ont eu le temps
+                         * d'ajouter leurs PlayerInfo. On les retire ensuite.
                          */
+                        visibilityController.applyAll();
+
                         virtualTabService.refreshAll();
                     }
                 },
-                5L
+                config.getVisibilityInitialDelayTicks()
             );
     }
 
@@ -99,10 +107,6 @@ public final class KtabPlayerListener
             event.getPlayer()
                 .getUniqueId();
 
-        /*
-         * Aucun packet n'est nécessaire pour le joueur qui part :
-         * on libère uniquement ses snapshots.
-         */
         tabService.remove(
             playerId
         );
@@ -111,10 +115,6 @@ public final class KtabPlayerListener
             playerId
         );
 
-        /*
-         * Après le quit, le nombre de vrais joueurs a changé et peut libérer
-         * une ou plusieurs cellules virtuelles.
-         */
         plugin.getServer()
             .getScheduler()
             .runTaskLater(
@@ -122,6 +122,8 @@ public final class KtabPlayerListener
                 new Runnable() {
                     @Override
                     public void run() {
+
+                        visibilityController.applyAll();
                         virtualTabService.refreshAll();
                     }
                 },

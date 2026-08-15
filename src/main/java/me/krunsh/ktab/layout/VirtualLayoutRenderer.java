@@ -12,14 +12,7 @@ import me.krunsh.ktab.render.PlaceholderRenderer;
 /**
  * Transforme la configuration du layout en liste d'entrées virtuelles.
  *
- * L'ordre est volontairement column-major :
- *
- * colonne 0 / ligne 0..N
- * colonne 1 / ligne 0..N
- * ...
- *
- * C'est le comportement utilisé par le prototype historique et celui qui
- * correspond le mieux au remplissage visuel du TAB 1.8.
+ * L'ordre est column-major pour correspondre au remplissage visuel du TAB 1.8.
  */
 public final class VirtualLayoutRenderer {
 
@@ -81,7 +74,9 @@ public final class VirtualLayoutRenderer {
                     columns.get(i)
                 );
 
-            renderedColumns.add(lines);
+            renderedColumns.add(
+                lines
+            );
 
             rowCount =
                 Math.max(
@@ -106,7 +101,8 @@ public final class VirtualLayoutRenderer {
                 rowCount,
                 config.getVirtualMaxEntries(),
                 config.getVirtualReservedRealEntries(),
-                onlinePlayers
+                onlinePlayers,
+                config.isHideRealPlayers()
             );
 
         if (entryLimit <= 0) {
@@ -121,23 +117,29 @@ public final class VirtualLayoutRenderer {
                 column++) {
 
             List<String> lines =
-                renderedColumns.get(column);
+                renderedColumns.get(
+                    column
+                );
 
             for (int row = 0;
                     row < rowCount
-                        && entries.size() < entryLimit;
+                        && entries.size()
+                            < entryLimit;
                     row++) {
 
                 String value =
                     row < lines.size()
                         ? lines.get(row)
-                        : config.getVirtualBlankText();
+                        : config
+                            .getVirtualBlankText();
 
                 if (value == null
-                        || value.trim().isEmpty()) {
+                        || value.trim()
+                            .isEmpty()) {
 
                     value =
-                        config.getVirtualBlankText();
+                        config
+                            .getVirtualBlankText();
                 }
 
                 entries.add(

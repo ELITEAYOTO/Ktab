@@ -13,15 +13,10 @@ import me.krunsh.ktab.listener.KtabPlayerListener;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 import me.krunsh.ktab.service.TabService;
 import me.krunsh.ktab.service.VirtualTabService;
+import me.krunsh.ktab.visibility.TabVisibilityController;
 
 /**
  * Point d'entrée de Ktab.
- *
- * V3 :
- * - lifecycle join/quit dédié ;
- * - refresh ciblé sans attendre le prochain cycle ;
- * - commandes debug / refresh ;
- * - aucune dépendance Java vers KjobsUltimate.
  */
 public final class KtabPlugin extends JavaPlugin {
 
@@ -30,6 +25,7 @@ public final class KtabPlugin extends JavaPlugin {
 
     private TabService tabService;
     private VirtualTabService virtualTabService;
+    private TabVisibilityController visibilityController;
 
     @Override
     public void onEnable() {
@@ -51,11 +47,18 @@ public final class KtabPlugin extends JavaPlugin {
                 placeholderRenderer
             );
 
+        visibilityController =
+            new TabVisibilityController(
+                this,
+                ktabConfig
+            );
+
         virtualTabService =
             new VirtualTabService(
                 this,
                 ktabConfig,
-                placeholderRenderer
+                placeholderRenderer,
+                visibilityController
             );
 
         getServer()
@@ -63,14 +66,35 @@ public final class KtabPlugin extends JavaPlugin {
             .registerEvents(
                 new KtabPlayerListener(
                     this,
+                    ktabConfig,
                     tabService,
-                    virtualTabService
+                    virtualTabService,
+                    visibilityController
                 ),
                 this
             );
 
         tabService.start();
         virtualTabService.start();
+
+        if (ktabConfig.isVirtualLayoutEnabled()) {
+
+            getServer()
+                .getScheduler()
+                .runTaskLater(
+                    this,
+                    new Runnable() {
+                        @Override
+                        public void run() {
+
+                            visibilityController.applyAll();
+                            virtualTabService.refreshAll();
+                        }
+                    },
+                    ktabConfig
+                        .getVisibilityInitialDelayTicks()
+                );
+        }
 
         getLogger().info(
             "Ktab actif."
@@ -82,6 +106,18 @@ public final class KtabPlugin extends JavaPlugin {
 
         if (virtualTabService != null) {
             virtualTabService.shutdown();
+        }
+
+        /*
+         * Si on a volontairement caché les joueurs réels, on les restaure
+         * avant que Ktab disparaisse.
+         */
+        if (visibilityController != null
+                && ktabConfig != null
+                && ktabConfig.isHideRealPlayers()) {
+
+            visibilityController
+                .restoreRealPlayers();
         }
 
         if (tabService != null) {
@@ -123,10 +159,34 @@ public final class KtabPlugin extends JavaPlugin {
         if ("reload".equalsIgnoreCase(
                 args[0])) {
 
+            boolean wasHidingRealPlayers =
+                ktabConfig.isHideRealPlayers();
+
             ktabConfig.reload();
+
+            visibilityController
+                .refreshHooks();
+
+            if (wasHidingRealPlayers
+                    && !ktabConfig
+                        .isHideRealPlayers()) {
+
+                visibilityController
+                    .restoreRealPlayers();
+            }
 
             tabService.restart();
             virtualTabService.restart();
+
+            if (ktabConfig
+                    .isVirtualLayoutEnabled()) {
+
+                visibilityController
+                    .applyAll();
+
+                virtualTabService
+                    .refreshAll();
+            }
 
             sender.sendMessage(
                 "§aKtab rechargé."
@@ -186,6 +246,7 @@ public final class KtabPlugin extends JavaPlugin {
                     && "all".equalsIgnoreCase(
                         args[1])) {
 
+                visibilityController.applyAll();
                 tabService.refreshAll();
                 virtualTabService.refreshAll();
 
@@ -207,8 +268,17 @@ public final class KtabPlugin extends JavaPlugin {
                 return true;
             }
 
-            tabService.refresh(target);
-            virtualTabService.refresh(target);
+            visibilityController.apply(
+                target
+            );
+
+            tabService.refresh(
+                target
+            );
+
+            virtualTabService.refresh(
+                target
+            );
 
             sender.sendMessage(
                 "§aRefresh Ktab demandé pour §e"
@@ -295,19 +365,6 @@ public final class KtabPlugin extends JavaPlugin {
         );
 
         sender.sendMessage(
-            "§7Header/Footer: §f"
-                + ktabConfig
-                    .getUpdateIntervalTicks()
-                + "t §8| §7cache=§f"
-                + tabService
-                    .getCachedViewerCount()
-                + " §8| §7last=§f"
-                + tabService
-                    .getLastCycleMillis()
-                + "ms"
-        );
-
-        sender.sendMessage(
             "§7Virtual: "
                 + yn(
                     ktabConfig
@@ -319,13 +376,40 @@ public final class KtabPlugin extends JavaPlugin {
                 + "x"
                 + ktabConfig
                     .getVirtualRows()
-                + " §8| §7cache=§f"
-                + virtualTabService
-                    .getCachedViewerCount()
         );
 
         sender.sendMessage(
-            "§7Virtual packets: §a+"
+            "§7Hide real players: "
+                + yn(
+                    ktabConfig
+                        .isHideRealPlayers()
+                )
+                + " §8| §7last=§f"
+                + visibilityController
+                    .getLastHiddenRealPlayers()
+        );
+
+        sender.sendMessage(
+            "§7Hide ServerNPC: "
+                + yn(
+                    ktabConfig
+                        .isHideServerNpcs()
+                )
+                + " §8| §7hook="
+                + yn(
+                    visibilityController
+                        .isServerNpcAvailable()
+                )
+                + " §8| §7last=§f"
+                + visibilityController
+                    .getLastHiddenNpcs()
+        );
+
+        sender.sendMessage(
+            "§7Virtual cache: §f"
+                + virtualTabService
+                    .getCachedViewerCount()
+                + " §8| §7packets: §a+"
                 + virtualTabService
                     .getLastAdds()
                 + " §e~"
@@ -334,10 +418,12 @@ public final class KtabPlugin extends JavaPlugin {
                 + " §c-"
                 + virtualTabService
                     .getLastRemoves()
-                + " §8| §7cycle=§f"
-                + virtualTabService
-                    .getLastCycleMillis()
-                + "ms"
+        );
+
+        sender.sendMessage(
+            "§7NMS visibility: §f"
+                + visibilityController
+                    .getNmsVersion()
         );
 
         sender.sendMessage(
@@ -402,20 +488,6 @@ public final class KtabPlugin extends JavaPlugin {
         );
 
         sender.sendMessage(
-            "§7Online: "
-                + yn(
-                    target.isOnline()
-                )
-                + " §8| §7ping=§f"
-                + placeholderRenderer.render(
-                    target,
-                    "%player_ping%",
-                    false
-                )
-                + "ms"
-        );
-
-        sender.sendMessage(
             "§7Header/Footer cached: "
                 + yn(
                     tabService.isCached(
@@ -440,7 +512,16 @@ public final class KtabPlugin extends JavaPlugin {
         );
 
         sender.sendMessage(
-            "§7Kjobs PAPI sample:"
+            "§7Visibility real/npc: §f"
+                + visibilityController
+                    .getLastHiddenRealPlayers()
+                + "/"
+                + visibilityController
+                    .getLastHiddenNpcs()
+        );
+
+        sender.sendMessage(
+            "§7Kjobs PAPI:"
         );
 
         sender.sendMessage(

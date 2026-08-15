@@ -7,10 +7,13 @@ author: krunsh
 depend:
   - PlaceholderAPI
 
+softdepend:
+  - ServerNPC
+
 commands:
   ktab:
     description: Administration de Ktab
-    usage: /ktab <reload|status>
+    usage: /ktab <reload|status|preview|debug|refresh|clear>
     permission: ktab.admin
 
 permissions:
