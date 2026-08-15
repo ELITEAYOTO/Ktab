@@ -13,7 +13,7 @@ softdepend:
 commands:
   ktab:
     description: Administration de Ktab
-    usage: /ktab <status|reload|preview|debug|refresh|clear|skin>
+    usage: /ktab <status|reload|preview|debug|refresh|clear|validate|dump|skin>
     permission: ktab.admin
 
 permissions:

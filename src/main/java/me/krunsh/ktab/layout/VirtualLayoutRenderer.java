@@ -11,6 +11,13 @@ import me.krunsh.ktab.render.PlaceholderRenderer;
 
 /**
  * Transforme la configuration en cellules virtuelles finales.
+ *
+ * V7 utilise une vraie grille fixe :
+ * - 1 à 4 colonnes ;
+ * - 1 à 20 lignes ;
+ * - row optionnel en YAML pour un placement exact ;
+ * - toutes les positions explicites sont réservées en premier ;
+ * - les cellules sans row remplissent ensuite les premières lignes libres.
  */
 public final class VirtualLayoutRenderer {
 
@@ -56,39 +63,12 @@ public final class VirtualLayoutRenderer {
             return Collections.emptyList();
         }
 
-        List<List<RenderedVirtualCell>> renderedColumns =
-            new ArrayList<List<RenderedVirtualCell>>();
-
         int rowCount =
-            config.getVirtualRows();
-
-        for (int i = 0;
-                i < columnCount;
-                i++) {
-
-            List<RenderedVirtualCell> lines =
-                renderColumn(
-                    viewer,
-                    columns.get(i)
-                );
-
-            renderedColumns.add(
-                lines
-            );
-
-            rowCount =
-                Math.max(
-                    rowCount,
-                    lines.size()
-                );
-        }
-
-        rowCount =
             Math.min(
                 20,
                 Math.max(
                     1,
-                    rowCount
+                    config.getVirtualRows()
                 )
             );
 
@@ -131,46 +111,44 @@ public final class VirtualLayoutRenderer {
         List<RenderedVirtualCell> entries =
             new ArrayList<RenderedVirtualCell>();
 
-        for (int column = 0;
-                column < columnCount;
-                column++) {
+        for (int columnIndex = 0;
+                columnIndex < columnCount
+                    && entries.size() < entryLimit;
+                columnIndex++) {
 
-            List<RenderedVirtualCell> lines =
-                renderedColumns.get(
-                    column
+            TabColumn column =
+                columns.get(
+                    columnIndex
                 );
 
-            for (int row = 0;
-                    row < rowCount
-                        && entries.size()
-                            < entryLimit;
-                    row++) {
+            List<RenderedVirtualCell> renderedColumn =
+                renderColumn(
+                    viewer,
+                    column,
+                    columnIndex,
+                    rowCount,
+                    blankText
+                );
+
+            for (int rowIndex = 0;
+                    rowIndex < renderedColumn.size()
+                        && entries.size() < entryLimit;
+                    rowIndex++) {
 
                 RenderedVirtualCell cell =
-                    row < lines.size()
-                        ? lines.get(row)
-                        : new RenderedVirtualCell(
-                            blankText,
-                            config.getVirtualBlankSkinId()
-                        );
-
-                String value =
-                    cell.getText();
-
-                if (value == null
-                        || value.trim()
-                            .isEmpty()) {
-
-                    value =
-                        blankText;
-                }
+                    renderedColumn.get(
+                        rowIndex
+                    );
 
                 entries.add(
                     new RenderedVirtualCell(
                         prefix
-                            + value
+                            + cell.getText()
                             + suffix,
-                        cell.getSkinId()
+                        cell.getSkinId(),
+                        cell.getColumnId(),
+                        cell.getColumnIndex(),
+                        cell.getRowIndex()
                     )
                 );
             }
@@ -181,10 +159,25 @@ public final class VirtualLayoutRenderer {
 
     private List<RenderedVirtualCell> renderColumn(
             Player viewer,
-            TabColumn column) {
+            TabColumn column,
+            int columnIndex,
+            int rowCount,
+            String blankText) {
 
-        List<RenderedVirtualCell> result =
-            new ArrayList<RenderedVirtualCell>();
+        List<RenderedVirtualCell> rows =
+            new ArrayList<RenderedVirtualCell>(
+                rowCount
+            );
+
+        for (int row = 0;
+                row < rowCount;
+                row++) {
+
+            rows.add(null);
+        }
+
+        List<TabCell> cells =
+            new ArrayList<TabCell>();
 
         TabCell title =
             column.getTitle();
@@ -195,69 +188,228 @@ public final class VirtualLayoutRenderer {
                     .trim()
                     .isEmpty()) {
 
-            addSplit(
-                result,
-                renderer.render(
-                    viewer,
-                    title.getText(),
-                    config.isPlaceholderApiEnabled()
-                ),
-                title.getSkinId()
+            cells.add(
+                title
             );
         }
 
-        for (TabCell rawCell
-                : column.getLines()) {
+        cells.addAll(
+            column.getLines()
+        );
 
-            if (rawCell == null) {
+        /*
+         * PASS 1 :
+         * réserve toutes les positions explicites.
+         */
+        for (TabCell cell : cells) {
+
+            if (cell == null
+                    || !cell.hasExplicitRow()) {
+
                 continue;
             }
 
-            addSplit(
-                result,
-                renderer.render(
-                    viewer,
-                    rawCell.getText(),
-                    config.isPlaceholderApiEnabled()
-                ),
-                rawCell.getSkinId()
+            placeExplicit(
+                rows,
+                viewer,
+                column,
+                columnIndex,
+                cell
             );
         }
 
-        return result;
+        /*
+         * PASS 2 :
+         * les cellules automatiques prennent les premières places libres.
+         */
+        int nextAutoRow =
+            0;
+
+        for (TabCell cell : cells) {
+
+            if (cell == null
+                    || cell.hasExplicitRow()) {
+
+                continue;
+            }
+
+            nextAutoRow =
+                placeAutomatic(
+                    rows,
+                    viewer,
+                    column,
+                    columnIndex,
+                    cell,
+                    nextAutoRow
+                );
+        }
+
+        for (int row = 0;
+                row < rowCount;
+                row++) {
+
+            if (rows.get(row) == null) {
+
+                rows.set(
+                    row,
+                    new RenderedVirtualCell(
+                        blankText,
+                        config.getVirtualBlankSkinId(),
+                        column.getId(),
+                        columnIndex,
+                        row
+                    )
+                );
+            }
+        }
+
+        return rows;
     }
 
-    private static void addSplit(
-            List<RenderedVirtualCell> target,
-            String value,
-            String skinId) {
+    private void placeExplicit(
+            List<RenderedVirtualCell> rows,
+            Player viewer,
+            TabColumn column,
+            int columnIndex,
+            TabCell configured) {
 
-        if (value == null) {
+        int startRow =
+            configured.getConfiguredRow()
+                - 1;
 
-            target.add(
-                new RenderedVirtualCell(
-                    "",
-                    skinId
-                )
-            );
+        if (startRow < 0
+                || startRow >= rows.size()) {
 
             return;
         }
 
         String[] split =
-            value.split(
-                "\\n",
-                -1
+            renderSplit(
+                viewer,
+                configured
+            );
+
+        for (int offset = 0;
+                offset < split.length;
+                offset++) {
+
+            int row =
+                startRow
+                    + offset;
+
+            if (row >= rows.size()) {
+                break;
+            }
+
+            /*
+             * En cas de collision on conserve la première cellule.
+             * /ktab validate signale précisément la configuration fautive.
+             */
+            if (rows.get(row) != null) {
+                continue;
+            }
+
+            rows.set(
+                row,
+                new RenderedVirtualCell(
+                    split[offset],
+                    configured.getSkinId(),
+                    column.getId(),
+                    columnIndex,
+                    row
+                )
+            );
+        }
+    }
+
+    private int placeAutomatic(
+            List<RenderedVirtualCell> rows,
+            Player viewer,
+            TabColumn column,
+            int columnIndex,
+            TabCell configured,
+            int startSearchRow) {
+
+        String[] split =
+            renderSplit(
+                viewer,
+                configured
+            );
+
+        int searchRow =
+            Math.max(
+                0,
+                startSearchRow
             );
 
         for (String line : split) {
 
-            target.add(
+            int row =
+                findNextFree(
+                    rows,
+                    searchRow
+                );
+
+            if (row < 0) {
+                return rows.size();
+            }
+
+            rows.set(
+                row,
                 new RenderedVirtualCell(
                     line,
-                    skinId
+                    configured.getSkinId(),
+                    column.getId(),
+                    columnIndex,
+                    row
                 )
             );
+
+            searchRow =
+                row + 1;
         }
+
+        return searchRow;
+    }
+
+    private String[] renderSplit(
+            Player viewer,
+            TabCell configured) {
+
+        String rendered =
+            renderer.render(
+                viewer,
+                configured.getText(),
+                config.isPlaceholderApiEnabled()
+            );
+
+        return rendered == null
+            ? new String[] {""}
+            : rendered.split(
+                "\\n",
+                -1
+            );
+    }
+
+    private static int findNextFree(
+            List<RenderedVirtualCell> rows,
+            int start) {
+
+        int safeStart =
+            Math.max(
+                0,
+                start
+            );
+
+        for (int row = safeStart;
+                row < rows.size();
+                row++) {
+
+            if (rows.get(row) == null) {
+                return row;
+            }
+        }
+
+        return -1;
     }
 }

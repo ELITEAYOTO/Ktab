@@ -14,11 +14,14 @@ import org.bukkit.entity.Player;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
+import me.krunsh.ktab.layout.RenderedVirtualCell;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 import me.krunsh.ktab.service.TabService;
 import me.krunsh.ktab.service.VirtualTabService;
 import me.krunsh.ktab.skin.ResolvedTabSkin;
 import me.krunsh.ktab.visibility.TabVisibilityController;
+import me.krunsh.ktab.validation.KtabValidator;
+import me.krunsh.ktab.validation.ValidationIssue;
 
 /**
  * Commande /ktab.
@@ -149,6 +152,24 @@ public final class KtabCommand
             return true;
         }
 
+        if ("validate".equalsIgnoreCase(
+                args[0])) {
+
+            sendValidation(sender);
+            return true;
+        }
+
+        if ("dump".equalsIgnoreCase(
+                args[0])) {
+
+            handleDump(
+                sender,
+                args
+            );
+
+            return true;
+        }
+
         if ("skin".equalsIgnoreCase(
                 args[0])
                 || "skins".equalsIgnoreCase(
@@ -190,6 +211,8 @@ public final class KtabCommand
                     "debug",
                     "refresh",
                     "clear",
+                    "validate",
+                    "dump",
                     "skin"
                 )
             );
@@ -271,6 +294,31 @@ public final class KtabCommand
             return complete(
                 args[1],
                 values
+            );
+        }
+
+        if (args.length == 2
+                && "dump".equals(root)) {
+
+            return complete(
+                args[1],
+                onlinePlayerNames()
+            );
+        }
+
+        if (args.length == 3
+                && "dump".equals(root)) {
+
+            return complete(
+                args[2],
+                Arrays.asList(
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6"
+                )
             );
         }
 
@@ -398,6 +446,210 @@ public final class KtabCommand
             "§aEntrées virtuelles retirées pour §e"
                 + target.getName()
                 + "§a."
+        );
+    }
+
+    private void sendValidation(
+            CommandSender sender) {
+
+        List<ValidationIssue> issues =
+            new KtabValidator(
+                config
+            ).validate();
+
+        int errors = 0;
+        int warnings = 0;
+
+        for (ValidationIssue issue : issues) {
+
+            if (issue.isError()) {
+                errors++;
+            } else {
+                warnings++;
+            }
+        }
+
+        sender.sendMessage(
+            "§8----------------------------------------"
+        );
+
+        sender.sendMessage(
+            "§6§lKtab §7- Validation"
+        );
+
+        if (issues.isEmpty()) {
+
+            sender.sendMessage(
+                "§aConfiguration valide : aucune erreur ni alerte."
+            );
+
+        } else {
+
+            sender.sendMessage(
+                "§7Résultat: §c"
+                    + errors
+                    + " erreur(s) §8| §e"
+                    + warnings
+                    + " alerte(s)"
+            );
+
+            for (ValidationIssue issue : issues) {
+
+                String prefix =
+                    issue.isError()
+                        ? "§cERREUR"
+                        : "§eALERTE";
+
+                sender.sendMessage(
+                    prefix
+                        + " §8[§7"
+                        + issue.getPath()
+                        + "§8] §f"
+                        + issue.getMessage()
+                );
+            }
+        }
+
+        sender.sendMessage(
+            "§8----------------------------------------"
+        );
+    }
+
+    private void handleDump(
+            CommandSender sender,
+            String[] args) {
+
+        Player viewer =
+            resolveTarget(
+                sender,
+                args,
+                1
+            );
+
+        if (viewer == null) {
+            return;
+        }
+
+        int page =
+            1;
+
+        if (args.length >= 3) {
+
+            try {
+
+                page =
+                    Math.max(
+                        1,
+                        Integer.parseInt(
+                            args[2]
+                        )
+                    );
+
+            } catch (NumberFormatException ignored) {
+                page = 1;
+            }
+        }
+
+        List<RenderedVirtualCell> cells =
+            virtualTabService
+                .previewCells(
+                    viewer
+                );
+
+        final int pageSize =
+            15;
+
+        int pageCount =
+            Math.max(
+                1,
+                (cells.size()
+                    + pageSize
+                    - 1)
+                    / pageSize
+            );
+
+        page =
+            Math.min(
+                page,
+                pageCount
+            );
+
+        int start =
+            (page - 1)
+                * pageSize;
+
+        int end =
+            Math.min(
+                cells.size(),
+                start + pageSize
+            );
+
+        sender.sendMessage(
+            "§8----------------------------------------"
+        );
+
+        sender.sendMessage(
+            "§6§lKtab §7- Dump §f"
+                + viewer.getName()
+                + " §8("
+                + page
+                + "/"
+                + pageCount
+                + ")"
+        );
+
+        for (int index = start;
+                index < end;
+                index++) {
+
+            RenderedVirtualCell cell =
+                cells.get(index);
+
+            ResolvedTabSkin skin =
+                virtualTabService
+                    .resolveSkin(
+                        viewer,
+                        cell.getSkinId()
+                    );
+
+            sender.sendMessage(
+                "§8#"
+                    + pad2(index)
+                    + " §7c"
+                    + cell.getDisplayColumn()
+                    + "/r"
+                    + cell.getDisplayRow()
+                    + " §8"
+                    + cell.getColumnId()
+                    + " §7skin=§f"
+                    + emptyAsNone(
+                        cell.getSkinId()
+                    )
+                    + " §8("
+                    + skin.getSource()
+                    + ")"
+            );
+
+            sender.sendMessage(
+                "§8   §r"
+                    + cell.getText()
+            );
+        }
+
+        sender.sendMessage(
+            "§7Entrées: §f"
+                + cells.size()
+                + " §8| §7page suivante: §e/ktab dump "
+                + viewer.getName()
+                + " "
+                + Math.min(
+                    pageCount,
+                    page + 1
+                )
+        );
+
+        sender.sendMessage(
+            "§8----------------------------------------"
         );
     }
 
@@ -1020,11 +1272,34 @@ public final class KtabCommand
         return builder.toString();
     }
 
+    private static String pad2(
+            int value) {
+
+        if (value < 10) {
+            return "0"
+                + value;
+        }
+
+        return String.valueOf(
+            value
+        );
+    }
+
+    private static String emptyAsNone(
+            String value) {
+
+        return value == null
+                || value.trim()
+                    .isEmpty()
+            ? "none"
+            : value;
+    }
+
     private static void sendUsage(
             CommandSender sender) {
 
         sender.sendMessage(
-            "§7Usage: §e/ktab <status|reload|preview|debug|refresh|clear|skin>"
+            "§7Usage: §e/ktab <status|reload|preview|debug|refresh|clear|validate|dump|skin>"
         );
     }
 

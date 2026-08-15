@@ -231,21 +231,29 @@ public final class VirtualTabService {
         skinPreviews.clear();
     }
 
-    /**
-     * Preview historique utilisé par /ktab preview.
-     */
-    public List<String> preview(
+    public List<RenderedVirtualCell> previewCells(
             Player viewer) {
 
         if (viewer == null) {
             return Collections.emptyList();
         }
 
+        return layoutRenderer.render(
+            viewer,
+            Bukkit.getOnlinePlayers()
+                .size()
+        );
+    }
+
+    /**
+     * Preview texte historique utilisé par /ktab preview.
+     */
+    public List<String> preview(
+            Player viewer) {
+
         List<RenderedVirtualCell> cells =
-            layoutRenderer.render(
-                viewer,
-                Bukkit.getOnlinePlayers()
-                    .size()
+            previewCells(
+                viewer
             );
 
         List<String> result =

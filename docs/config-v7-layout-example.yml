@@ -1,0 +1,47 @@
+# Exemple V7 — positions exactes
+#
+# À fusionner dans src/main/resources/config.yml si tu veux utiliser row.
+
+virtual_layout:
+  columns:
+
+    infos:
+      enabled: true
+      title: "&6&lVOLKARIA"
+      title_row: 1
+
+      lines:
+        - row: 2
+          text: "&7Joueur: &f%player_name%"
+          skin: "viewer"
+
+        - row: 3
+          text: "&7Métier: &e%kjob_display_job_name%"
+
+        - row: 4
+          text: "&7Niveau global: &e%kjob_global_level%"
+
+        - row: 6
+          text: "&7Slots: &f%kjob_slots_used%&8/&f%kjob_slots_unlocked%"
+
+        - row: 7
+          text: "&7Quêtes: &a%kjob_claimable_quests%"
+
+    jobs:
+      enabled: true
+      title: "&e&lMÉTIERS"
+      title_row: 1
+
+      lines:
+        - row: 2
+          text: "&7Mineur: &fNv.%kjob_level_mineur%"
+        - row: 3
+          text: "&7Farmer: &fNv.%kjob_level_farmer%"
+        - row: 4
+          text: "&7Chasseur: &fNv.%kjob_level_hunter%"
+        - row: 5
+          text: "&7Prétorien: &fNv.%kjob_level_pretorien%"
+        - row: 6
+          text: "&7Artisan: &fNv.%kjob_level_artisan%"
+        - row: 7
+          text: "&7Pilleur: &fNv.%kjob_level_pilleur%"

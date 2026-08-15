@@ -572,6 +572,12 @@ public final class KtabConfig {
                     )
                 );
 
+            int titleRow =
+                section.getInt(
+                    "title_row",
+                    1
+                );
+
             List<TabCell> lines =
                 loadCells(
                     section.getList(
@@ -586,7 +592,8 @@ public final class KtabConfig {
                     defaultSkin,
                     new TabCell(
                         titleText,
-                        titleSkin
+                        titleSkin,
+                        titleRow
                     ),
                     lines
                 )
@@ -642,6 +649,21 @@ public final class KtabConfig {
                 Map<?, ?> map =
                     (Map<?, ?>) raw;
 
+                Object enabledValue =
+                    map.get(
+                        "enabled"
+                    );
+
+                if (enabledValue != null
+                        && !Boolean.parseBoolean(
+                            String.valueOf(
+                                enabledValue
+                            )
+                        )) {
+
+                    continue;
+                }
+
                 Object textValue =
                     map.get(
                         "text"
@@ -650,6 +672,16 @@ public final class KtabConfig {
                 Object skinValue =
                     map.get(
                         "skin"
+                    );
+
+                Object rowValue =
+                    map.get(
+                        "row"
+                    );
+
+                int configuredRow =
+                    parseRow(
+                        rowValue
                     );
 
                 result.add(
@@ -665,7 +697,8 @@ public final class KtabConfig {
                                 String.valueOf(
                                     skinValue
                                 )
-                            )
+                            ),
+                        configuredRow
                     )
                 );
 
@@ -683,6 +716,30 @@ public final class KtabConfig {
         return Collections.unmodifiableList(
             result
         );
+    }
+
+    private static int parseRow(
+            Object raw) {
+
+        if (raw == null) {
+            return 0;
+        }
+
+        if (raw instanceof Number) {
+            return ((Number) raw)
+                .intValue();
+        }
+
+        try {
+
+            return Integer.parseInt(
+                String.valueOf(raw)
+                    .trim()
+            );
+
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
     }
 
     private static List<String> immutableCopy(
