@@ -10,9 +10,7 @@ import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 
 /**
- * Transforme la configuration du layout en liste d'entrées virtuelles.
- *
- * L'ordre est column-major pour correspondre au remplissage visuel du TAB 1.8.
+ * Transforme la configuration en cellules virtuelles finales.
  */
 public final class VirtualLayoutRenderer {
 
@@ -35,7 +33,7 @@ public final class VirtualLayoutRenderer {
         this.renderer = renderer;
     }
 
-    public List<String> render(
+    public List<RenderedVirtualCell> render(
             Player viewer,
             int onlinePlayers) {
 
@@ -58,8 +56,8 @@ public final class VirtualLayoutRenderer {
             return Collections.emptyList();
         }
 
-        List<List<String>> renderedColumns =
-            new ArrayList<List<String>>();
+        List<List<RenderedVirtualCell>> renderedColumns =
+            new ArrayList<List<RenderedVirtualCell>>();
 
         int rowCount =
             config.getVirtualRows();
@@ -68,7 +66,7 @@ public final class VirtualLayoutRenderer {
                 i < columnCount;
                 i++) {
 
-            List<String> lines =
+            List<RenderedVirtualCell> lines =
                 renderColumn(
                     viewer,
                     columns.get(i)
@@ -109,14 +107,35 @@ public final class VirtualLayoutRenderer {
             return Collections.emptyList();
         }
 
-        List<String> entries =
-            new ArrayList<String>();
+        String blankText =
+            renderer.render(
+                viewer,
+                config.getVirtualBlankText(),
+                false
+            );
+
+        String prefix =
+            renderer.render(
+                viewer,
+                config.getVirtualCellPrefix(),
+                false
+            );
+
+        String suffix =
+            renderer.render(
+                viewer,
+                config.getVirtualCellSuffix(),
+                false
+            );
+
+        List<RenderedVirtualCell> entries =
+            new ArrayList<RenderedVirtualCell>();
 
         for (int column = 0;
                 column < columnCount;
                 column++) {
 
-            List<String> lines =
+            List<RenderedVirtualCell> lines =
                 renderedColumns.get(
                     column
                 );
@@ -127,25 +146,32 @@ public final class VirtualLayoutRenderer {
                             < entryLimit;
                     row++) {
 
-                String value =
+                RenderedVirtualCell cell =
                     row < lines.size()
                         ? lines.get(row)
-                        : config
-                            .getVirtualBlankText();
+                        : new RenderedVirtualCell(
+                            blankText,
+                            config.getVirtualBlankSkinId()
+                        );
+
+                String value =
+                    cell.getText();
 
                 if (value == null
                         || value.trim()
                             .isEmpty()) {
 
                     value =
-                        config
-                            .getVirtualBlankText();
+                        blankText;
                 }
 
                 entries.add(
-                    config.getVirtualCellPrefix()
-                        + value
-                        + config.getVirtualCellSuffix()
+                    new RenderedVirtualCell(
+                        prefix
+                            + value
+                            + suffix,
+                        cell.getSkinId()
+                    )
                 );
             }
         }
@@ -153,15 +179,19 @@ public final class VirtualLayoutRenderer {
         return entries;
     }
 
-    private List<String> renderColumn(
+    private List<RenderedVirtualCell> renderColumn(
             Player viewer,
             TabColumn column) {
 
-        List<String> result =
-            new ArrayList<String>();
+        List<RenderedVirtualCell> result =
+            new ArrayList<RenderedVirtualCell>();
 
-        if (column.getTitle() != null
-                && !column.getTitle()
+        TabCell title =
+            column.getTitle();
+
+        if (title != null
+                && title.getText() != null
+                && !title.getText()
                     .trim()
                     .isEmpty()) {
 
@@ -169,22 +199,28 @@ public final class VirtualLayoutRenderer {
                 result,
                 renderer.render(
                     viewer,
-                    column.getTitle(),
+                    title.getText(),
                     config.isPlaceholderApiEnabled()
-                )
+                ),
+                title.getSkinId()
             );
         }
 
-        for (String rawLine
+        for (TabCell rawCell
                 : column.getLines()) {
+
+            if (rawCell == null) {
+                continue;
+            }
 
             addSplit(
                 result,
                 renderer.render(
                     viewer,
-                    rawLine,
+                    rawCell.getText(),
                     config.isPlaceholderApiEnabled()
-                )
+                ),
+                rawCell.getSkinId()
             );
         }
 
@@ -192,11 +228,19 @@ public final class VirtualLayoutRenderer {
     }
 
     private static void addSplit(
-            List<String> target,
-            String value) {
+            List<RenderedVirtualCell> target,
+            String value,
+            String skinId) {
 
         if (value == null) {
-            target.add("");
+
+            target.add(
+                new RenderedVirtualCell(
+                    "",
+                    skinId
+                )
+            );
+
             return;
         }
 
@@ -207,7 +251,13 @@ public final class VirtualLayoutRenderer {
             );
 
         for (String line : split) {
-            target.add(line);
+
+            target.add(
+                new RenderedVirtualCell(
+                    line,
+                    skinId
+                )
+            );
         }
     }
 }

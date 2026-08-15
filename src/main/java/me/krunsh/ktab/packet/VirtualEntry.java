@@ -2,6 +2,8 @@ package me.krunsh.ktab.packet;
 
 import java.util.UUID;
 
+import me.krunsh.ktab.skin.ResolvedTabSkin;
+
 /**
  * Identité stable d'une entrée fake du TAB.
  */
@@ -12,23 +14,32 @@ public final class VirtualEntry {
     private final String technicalName;
 
     private String displayName;
+    private final ResolvedTabSkin skin;
 
     public VirtualEntry(
             int index,
             UUID uuid,
             String technicalName,
-            String displayName) {
+            String displayName,
+            ResolvedTabSkin skin) {
 
         this.index = index;
         this.uuid = uuid;
+
         this.technicalName =
             technicalName == null
                 ? ""
                 : technicalName;
+
         this.displayName =
             displayName == null
                 ? ""
                 : displayName;
+
+        this.skin =
+            skin == null
+                ? ResolvedTabSkin.NONE
+                : skin;
     }
 
     public int getIndex() {
@@ -45,6 +56,10 @@ public final class VirtualEntry {
 
     public String getDisplayName() {
         return displayName;
+    }
+
+    public ResolvedTabSkin getSkin() {
+        return skin;
     }
 
     public void setDisplayName(

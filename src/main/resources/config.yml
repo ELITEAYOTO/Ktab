@@ -79,7 +79,9 @@ virtual_layout:
       enabled: true
       title: "&6&lVOLKARIA"
       lines:
-        - "&7Joueur: &f%player_name%"
+        - text: "&7Joueur: &f%player_name%"
+          skin: "viewer"
+
         - "&7Métier: &e%kjob_display_job_name%"
         - "&7Niveau global: &e%kjob_global_level%"
         - ""

@@ -1,0 +1,97 @@
+# ============================================================
+# Ktab V5 — EXEMPLE Custom Heads
+# À fusionner dans ton config.yml actuel, pas besoin de tout remplacer.
+# ============================================================
+
+# Profils de skins réutilisables.
+#
+# Formats supportés :
+# 1) texture_hash  -> hash textures.minecraft.net
+# 2) texture_url   -> URL complète
+# 3) value         -> valeur Base64 Mojang
+# 4) value + signature
+#
+# IDs réservés :
+# - none
+# - viewer   -> skin du joueur qui regarde le TAB
+# - player   -> alias de viewer
+#
+skins:
+
+  # Exemple :
+  # volkaria:
+  #   enabled: true
+  #   texture_hash: "COLLE_ICI_LE_HASH"
+  #   cache_key: "volkaria-v1"
+
+  # Exemple URL complète :
+  # server:
+  #   enabled: true
+  #   texture_url: "http://textures.minecraft.net/texture/HASH"
+  #   cache_key: "server-v1"
+
+  # Exemple Base64 signé :
+  # premium:
+  #   enabled: true
+  #   value: "BASE64_TEXTURE_VALUE"
+  #   signature: "SIGNATURE_MOJANG"
+  #   cache_key: "premium-v1"
+
+virtual_layout:
+
+  # Skin utilisée par défaut lorsqu'une colonne n'en précise pas.
+  default_skin: "none"
+
+  render:
+    # Tu peux mettre une tête dédiée aux cellules vides.
+    blank_skin: "none"
+
+  columns:
+
+    infos:
+      enabled: true
+
+      # Skin par défaut de cette colonne.
+      skin: "none"
+
+      # Skin spécifique du titre.
+      # title_skin: "volkaria"
+      title: "&6&lVOLKARIA"
+
+      lines:
+
+        # Syntaxe V5 : skin spécifique à cette ligne.
+        - text: "&7Joueur: &f%player_name%"
+          skin: "viewer"
+
+        # Ancienne syntaxe toujours compatible :
+        - "&7Métier: &e%kjob_display_job_name%"
+        - "&7Niveau global: &e%kjob_global_level%"
+
+    jobs:
+      enabled: true
+      title: "&e&lMÉTIERS"
+
+      # Exemple : toutes les lignes de la colonne utilisent cette tête.
+      # skin: "volkaria"
+
+      lines:
+        - "&7Mineur: &fNv.%kjob_level_mineur%"
+        - "&7Farmer: &fNv.%kjob_level_farmer%"
+        - "&7Chasseur: &fNv.%kjob_level_hunter%"
+        - "&7Prétorien: &fNv.%kjob_level_pretorien%"
+        - "&7Artisan: &fNv.%kjob_level_artisan%"
+        - "&7Pilleur: &fNv.%kjob_level_pilleur%"
+
+    server:
+      enabled: true
+      title: "&b&lSERVEUR"
+
+      # title_skin: "server"
+      # skin: "server"
+
+      lines:
+        - "&7En ligne: &f%server_online%"
+        - "&7Ping: &f%player_ping%ms"
+        - ""
+        - "&7www.volkaria.fr"

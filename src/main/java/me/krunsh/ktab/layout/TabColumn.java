@@ -10,38 +10,62 @@ import java.util.List;
 public final class TabColumn {
 
     private final String id;
-    private final String title;
-    private final List<String> lines;
+
+    private final String defaultSkinId;
+
+    private final TabCell title;
+    private final List<TabCell> lines;
 
     public TabColumn(
             String id,
-            String title,
-            List<String> lines) {
+            String defaultSkinId,
+            TabCell title,
+            List<TabCell> lines) {
 
         this.id =
-            id == null ? "" : id;
+            id == null
+                ? ""
+                : id;
+
+        this.defaultSkinId =
+            defaultSkinId == null
+                ? ""
+                : defaultSkinId;
 
         this.title =
-            title == null ? "" : title;
+            title == null
+                ? new TabCell(
+                    "",
+                    this.defaultSkinId
+                )
+                : title;
 
-        List<String> copy =
+        List<TabCell> copy =
             lines == null
-                ? new ArrayList<String>()
-                : new ArrayList<String>(lines);
+                ? new ArrayList<TabCell>()
+                : new ArrayList<TabCell>(
+                    lines
+                );
 
         this.lines =
-            Collections.unmodifiableList(copy);
+            Collections.unmodifiableList(
+                copy
+            );
     }
 
     public String getId() {
         return id;
     }
 
-    public String getTitle() {
+    public String getDefaultSkinId() {
+        return defaultSkinId;
+    }
+
+    public TabCell getTitle() {
         return title;
     }
 
-    public List<String> getLines() {
+    public List<TabCell> getLines() {
         return lines;
     }
 }

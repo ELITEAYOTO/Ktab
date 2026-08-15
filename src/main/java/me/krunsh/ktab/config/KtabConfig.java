@@ -2,13 +2,19 @@ package me.krunsh.ktab.config;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import me.krunsh.ktab.KtabPlugin;
+import me.krunsh.ktab.layout.TabCell;
 import me.krunsh.ktab.layout.TabColumn;
+import me.krunsh.ktab.skin.TabSkinDefinition;
 
 /**
  * Snapshot de configuration Ktab.
@@ -47,8 +53,14 @@ public final class KtabConfig {
     private String virtualCellPrefix;
     private String virtualCellSuffix;
 
+    private String virtualDefaultSkinId;
+    private String virtualBlankSkinId;
+
     private List<TabColumn> virtualColumns =
         Collections.emptyList();
+
+    private Map<String, TabSkinDefinition> skins =
+        Collections.emptyMap();
 
     private boolean hideRealPlayers;
     private boolean hideServerNpcs;
@@ -254,6 +266,27 @@ public final class KtabConfig {
                 ""
             );
 
+        virtualDefaultSkinId =
+            normalizeSkinId(
+                config.getString(
+                    "virtual_layout.default_skin",
+                    "none"
+                )
+            );
+
+        virtualBlankSkinId =
+            normalizeSkinId(
+                config.getString(
+                    "virtual_layout.render.blank_skin",
+                    virtualDefaultSkinId
+                )
+            );
+
+        skins =
+            loadSkins(
+                config
+            );
+
         virtualColumns =
             loadColumns(
                 config
@@ -365,8 +398,39 @@ public final class KtabConfig {
         return virtualCellSuffix;
     }
 
+    public String getVirtualDefaultSkinId() {
+        return virtualDefaultSkinId;
+    }
+
+    public String getVirtualBlankSkinId() {
+        return virtualBlankSkinId;
+    }
+
     public List<TabColumn> getVirtualColumns() {
         return virtualColumns;
+    }
+
+    public TabSkinDefinition getSkinDefinition(
+            String rawId) {
+
+        String id =
+            normalizeSkinId(
+                rawId
+            );
+
+        if (id.isEmpty()) {
+            return null;
+        }
+
+        return skins.get(id);
+    }
+
+    public Set<String> getSkinIds() {
+        return skins.keySet();
+    }
+
+    public int getSkinCount() {
+        return skins.size();
     }
 
     public boolean isHideRealPlayers() {
@@ -379,6 +443,79 @@ public final class KtabConfig {
 
     public long getVisibilityInitialDelayTicks() {
         return visibilityInitialDelayTicks;
+    }
+
+    private Map<String, TabSkinDefinition> loadSkins(
+            FileConfiguration config) {
+
+        ConfigurationSection section =
+            config.getConfigurationSection(
+                "skins"
+            );
+
+        if (section == null) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, TabSkinDefinition> result =
+            new LinkedHashMap<String, TabSkinDefinition>();
+
+        for (String rawId
+                : section.getKeys(false)) {
+
+            ConfigurationSection skin =
+                section.getConfigurationSection(
+                    rawId
+                );
+
+            if (skin == null) {
+                continue;
+            }
+
+            String id =
+                normalizeSkinId(
+                    rawId
+                );
+
+            if (id.isEmpty()) {
+                continue;
+            }
+
+            result.put(
+                id,
+                new TabSkinDefinition(
+                    id,
+                    skin.getBoolean(
+                        "enabled",
+                        true
+                    ),
+                    skin.getString(
+                        "value",
+                        ""
+                    ),
+                    skin.getString(
+                        "signature",
+                        ""
+                    ),
+                    skin.getString(
+                        "texture_hash",
+                        ""
+                    ),
+                    skin.getString(
+                        "texture_url",
+                        ""
+                    ),
+                    skin.getString(
+                        "cache_key",
+                        ""
+                    )
+                )
+            );
+        }
+
+        return Collections.unmodifiableMap(
+            result
+        );
     }
 
     private List<TabColumn> loadColumns(
@@ -413,16 +550,132 @@ public final class KtabConfig {
                 continue;
             }
 
+            String defaultSkin =
+                normalizeSkinId(
+                    section.getString(
+                        "skin",
+                        virtualDefaultSkinId
+                    )
+                );
+
+            String titleText =
+                section.getString(
+                    "title",
+                    ""
+                );
+
+            String titleSkin =
+                normalizeSkinId(
+                    section.getString(
+                        "title_skin",
+                        defaultSkin
+                    )
+                );
+
+            List<TabCell> lines =
+                loadCells(
+                    section.getList(
+                        "lines"
+                    ),
+                    defaultSkin
+                );
+
             result.add(
                 new TabColumn(
                     id,
-                    section.getString(
-                        "title",
-                        ""
+                    defaultSkin,
+                    new TabCell(
+                        titleText,
+                        titleSkin
                     ),
-                    section.getStringList(
-                        "lines"
+                    lines
+                )
+            );
+        }
+
+        return Collections.unmodifiableList(
+            result
+        );
+    }
+
+    private List<TabCell> loadCells(
+            List<?> rawLines,
+            String defaultSkin) {
+
+        if (rawLines == null
+                || rawLines.isEmpty()) {
+
+            return Collections.emptyList();
+        }
+
+        List<TabCell> result =
+            new ArrayList<TabCell>();
+
+        for (Object raw : rawLines) {
+
+            if (raw == null) {
+
+                result.add(
+                    new TabCell(
+                        "",
+                        defaultSkin
                     )
+                );
+
+                continue;
+            }
+
+            if (raw instanceof String) {
+
+                result.add(
+                    new TabCell(
+                        String.valueOf(raw),
+                        defaultSkin
+                    )
+                );
+
+                continue;
+            }
+
+            if (raw instanceof Map<?, ?>) {
+
+                Map<?, ?> map =
+                    (Map<?, ?>) raw;
+
+                Object textValue =
+                    map.get(
+                        "text"
+                    );
+
+                Object skinValue =
+                    map.get(
+                        "skin"
+                    );
+
+                result.add(
+                    new TabCell(
+                        textValue == null
+                            ? ""
+                            : String.valueOf(
+                                textValue
+                            ),
+                        skinValue == null
+                            ? defaultSkin
+                            : normalizeSkinId(
+                                String.valueOf(
+                                    skinValue
+                                )
+                            )
+                    )
+                );
+
+                continue;
+            }
+
+            result.add(
+                new TabCell(
+                    String.valueOf(raw),
+                    defaultSkin
                 )
             );
         }
@@ -455,6 +708,17 @@ public final class KtabConfig {
         return value == null
             ? fallback
             : value;
+    }
+
+    private static String normalizeSkinId(
+            String value) {
+
+        return value == null
+            ? ""
+            : value.trim()
+                .toLowerCase(
+                    Locale.ROOT
+                );
     }
 
     private static String sanitizeTechnicalPrefix(

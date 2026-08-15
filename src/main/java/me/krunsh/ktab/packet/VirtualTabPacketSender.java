@@ -9,10 +9,12 @@ import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
+import me.krunsh.ktab.skin.ResolvedTabSkin;
+
 /**
  * Couche packet des entrées virtuelles du TAB 1.8.8.
  *
- * Aucun import NMS compile-time.
+ * Les textures sont injectées dans le GameProfile avant ADD_PLAYER.
  */
 public final class VirtualTabPacketSender {
 
@@ -95,7 +97,9 @@ public final class VirtualTabPacketSender {
                     "a"
                 );
 
-            actionField.setAccessible(true);
+            actionField.setAccessible(
+                true
+            );
 
             listField =
                 findListField(
@@ -103,7 +107,9 @@ public final class VirtualTabPacketSender {
                     "b"
                 );
 
-            listField.setAccessible(true);
+            listField.setAccessible(
+                true
+            );
 
             Class<?> serializerClass =
                 Class.forName(
@@ -231,7 +237,9 @@ public final class VirtualTabPacketSender {
         Constructor<?> packetConstructor =
             packetClass.getDeclaredConstructor();
 
-        packetConstructor.setAccessible(true);
+        packetConstructor.setAccessible(
+            true
+        );
 
         Object packet =
             packetConstructor.newInstance();
@@ -289,6 +297,11 @@ public final class VirtualTabPacketSender {
                     entry.getTechnicalName()
                 );
 
+        applySkin(
+            profile,
+            entry.getSkin()
+        );
+
         Object gamemode =
             Enum.valueOf(
                 (Class<Enum>)
@@ -312,7 +325,9 @@ public final class VirtualTabPacketSender {
             Class<?>[] types =
                 constructor.getParameterTypes();
 
-            constructor.setAccessible(true);
+            constructor.setAccessible(
+                true
+            );
 
             if (types.length == 5) {
 
@@ -338,6 +353,102 @@ public final class VirtualTabPacketSender {
 
         throw new NoSuchMethodException(
             "Constructeur PlayerInfoData introuvable."
+        );
+    }
+
+    private void applySkin(
+            Object profile,
+            ResolvedTabSkin skin)
+            throws Exception {
+
+        if (profile == null
+                || skin == null
+                || !skin.hasTexture()) {
+
+            return;
+        }
+
+        Method getProperties =
+            profile.getClass()
+                .getMethod(
+                    "getProperties"
+                );
+
+        Object properties =
+            getProperties.invoke(
+                profile
+            );
+
+        Class<?> propertyClass =
+            Class.forName(
+                "com.mojang.authlib.properties.Property"
+            );
+
+        Object property;
+
+        if (skin.hasSignature()) {
+
+            property =
+                propertyClass
+                    .getConstructor(
+                        String.class,
+                        String.class,
+                        String.class
+                    )
+                    .newInstance(
+                        "textures",
+                        skin.getValue(),
+                        skin.getSignature()
+                    );
+
+        } else {
+
+            property =
+                propertyClass
+                    .getConstructor(
+                        String.class,
+                        String.class
+                    )
+                    .newInstance(
+                        "textures",
+                        skin.getValue()
+                    );
+        }
+
+        Method put =
+            findPutMethod(
+                properties
+            );
+
+        put.invoke(
+            properties,
+            "textures",
+            property
+        );
+    }
+
+    private static Method findPutMethod(
+            Object properties)
+            throws NoSuchMethodException {
+
+        for (Method method
+                : properties.getClass()
+                    .getMethods()) {
+
+            if (!"put".equals(
+                    method.getName())
+                    || method
+                        .getParameterTypes()
+                        .length != 2) {
+
+                continue;
+            }
+
+            return method;
+        }
+
+        throw new NoSuchMethodException(
+            "PropertyMap.put introuvable."
         );
     }
 
@@ -367,16 +478,14 @@ public final class VirtualTabPacketSender {
                 player
             );
 
-        Field connectionField =
+        Object connection =
             handle.getClass()
                 .getField(
                     "playerConnection"
+                )
+                .get(
+                    handle
                 );
-
-        Object connection =
-            connectionField.get(
-                handle
-            );
 
         Method sendPacket =
             connection.getClass()

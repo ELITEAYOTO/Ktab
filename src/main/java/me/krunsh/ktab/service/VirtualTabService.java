@@ -14,14 +14,22 @@ import org.bukkit.scheduler.BukkitTask;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
+import me.krunsh.ktab.layout.RenderedVirtualCell;
 import me.krunsh.ktab.layout.VirtualLayoutRenderer;
 import me.krunsh.ktab.packet.VirtualEntry;
 import me.krunsh.ktab.packet.VirtualTabPacketSender;
 import me.krunsh.ktab.render.PlaceholderRenderer;
+import me.krunsh.ktab.skin.ResolvedTabSkin;
+import me.krunsh.ktab.skin.TabSkinResolver;
 import me.krunsh.ktab.visibility.TabVisibilityController;
 
 /**
  * Service des entrées virtuelles du TAB.
+ *
+ * V5 :
+ * - texte changé seul -> UPDATE_DISPLAY_NAME ;
+ * - skin changée -> REMOVE_PLAYER + ADD_PLAYER ;
+ * - l'UUID fake dépend du cacheKey de skin pour forcer le refresh client.
  */
 public final class VirtualTabService {
 
@@ -31,6 +39,7 @@ public final class VirtualTabService {
     private final VirtualLayoutRenderer layoutRenderer;
     private final VirtualTabPacketSender packetSender;
     private final TabVisibilityController visibilityController;
+    private final TabSkinResolver skinResolver;
 
     private final Map<UUID, List<VirtualEntry>> cache =
         new HashMap<UUID, List<VirtualEntry>>();
@@ -71,6 +80,12 @@ public final class VirtualTabService {
 
         packetSender =
             new VirtualTabPacketSender();
+
+        skinResolver =
+            new TabSkinResolver(
+                plugin,
+                config
+            );
     }
 
     public void start() {
@@ -103,7 +118,9 @@ public final class VirtualTabService {
                 + packetSender.getNmsVersion()
                 + ", interval="
                 + config.getVirtualUpdateIntervalTicks()
-                + " ticks."
+                + " ticks, skins="
+                + config.getSkinCount()
+                + "."
         );
     }
 
@@ -180,6 +197,7 @@ public final class VirtualTabService {
         }
 
         for (VirtualEntry entry : previous) {
+
             safeRemove(
                 viewer,
                 entry
@@ -206,6 +224,9 @@ public final class VirtualTabService {
         cache.clear();
     }
 
+    /**
+     * Preview historique utilisé par /ktab preview.
+     */
     public List<String> preview(
             Player viewer) {
 
@@ -213,11 +234,26 @@ public final class VirtualTabService {
             return Collections.emptyList();
         }
 
-        return layoutRenderer.render(
-            viewer,
-            Bukkit.getOnlinePlayers()
-                .size()
-        );
+        List<RenderedVirtualCell> cells =
+            layoutRenderer.render(
+                viewer,
+                Bukkit.getOnlinePlayers()
+                    .size()
+            );
+
+        List<String> result =
+            new ArrayList<String>();
+
+        for (RenderedVirtualCell cell : cells) {
+
+            result.add(
+                cell == null
+                    ? ""
+                    : cell.getText()
+            );
+        }
+
+        return result;
     }
 
     public int getCachedViewerCount() {
@@ -299,16 +335,11 @@ public final class VirtualTabService {
             Player viewer,
             int onlinePlayers) {
 
-        /*
-         * Important :
-         * on retire les vraies entrées / ServerNPC AVANT le diff Ktab,
-         * afin qu'elles ne puissent pas décaler la grille virtuelle.
-         */
         visibilityController.apply(
             viewer
         );
 
-        List<String> rendered =
+        List<RenderedVirtualCell> rendered =
             layoutRenderer.render(
                 viewer,
                 onlinePlayers
@@ -342,12 +373,12 @@ public final class VirtualTabService {
                     ? previous.get(index)
                     : null;
 
-            String text =
+            RenderedVirtualCell cell =
                 index < rendered.size()
                     ? rendered.get(index)
                     : null;
 
-            if (text == null) {
+            if (cell == null) {
 
                 if (old != null) {
 
@@ -362,16 +393,21 @@ public final class VirtualTabService {
                 continue;
             }
 
-            VirtualEntry entry =
-                old == null
-                    ? createEntry(
-                        viewer,
-                        index,
-                        text
-                    )
-                    : old;
+            ResolvedTabSkin skin =
+                skinResolver.resolve(
+                    viewer,
+                    cell.getSkinId()
+                );
 
             if (old == null) {
+
+                VirtualEntry entry =
+                    createEntry(
+                        viewer,
+                        index,
+                        cell.getText(),
+                        skin
+                    );
 
                 safeAdd(
                     viewer,
@@ -380,23 +416,70 @@ public final class VirtualTabService {
 
                 lastAdds++;
 
-            } else if (!text.equals(
-                    old.getDisplayName())) {
+                next.add(
+                    entry
+                );
 
-                entry.setDisplayName(
-                    text
+                continue;
+            }
+
+            boolean skinChanged =
+                !skin.getCacheKey()
+                    .equals(
+                        old.getSkin()
+                            .getCacheKey()
+                    );
+
+            if (skinChanged) {
+
+                safeRemove(
+                    viewer,
+                    old
+                );
+
+                lastRemoves++;
+
+                VirtualEntry replacement =
+                    createEntry(
+                        viewer,
+                        index,
+                        cell.getText(),
+                        skin
+                    );
+
+                safeAdd(
+                    viewer,
+                    replacement
+                );
+
+                lastAdds++;
+
+                next.add(
+                    replacement
+                );
+
+                continue;
+            }
+
+            if (!cell.getText()
+                    .equals(
+                        old.getDisplayName()
+                    )) {
+
+                old.setDisplayName(
+                    cell.getText()
                 );
 
                 safeUpdate(
                     viewer,
-                    entry
+                    old
                 );
 
                 lastUpdates++;
             }
 
             next.add(
-                entry
+                old
             );
         }
 
@@ -409,7 +492,8 @@ public final class VirtualTabService {
     private VirtualEntry createEntry(
             Player viewer,
             int index,
-            String text) {
+            String text,
+            ResolvedTabSkin skin) {
 
         int stableIndex =
             config.getVirtualStartIndex()
@@ -431,6 +515,11 @@ public final class VirtualTabService {
                 );
         }
 
+        String skinCacheKey =
+            skin == null
+                ? "none"
+                : skin.getCacheKey();
+
         UUID uuid =
             UUID.nameUUIDFromBytes(
                 (
@@ -439,6 +528,8 @@ public final class VirtualTabService {
                         + viewer.getUniqueId()
                         + ":"
                         + index
+                        + ":"
+                        + skinCacheKey
                 ).getBytes(
                     StandardCharsets.UTF_8
                 )
@@ -448,7 +539,8 @@ public final class VirtualTabService {
             index,
             uuid,
             technicalName,
-            text
+            text,
+            skin
         );
     }
 
