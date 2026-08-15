@@ -20,12 +20,13 @@ import me.krunsh.ktab.packet.VirtualTabPacketSender;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 
 /**
- * Gère uniquement les entrées fake du layout virtuel.
+ * Service des entrées virtuelles du TAB.
  *
- * Le diff est fait par viewer :
- * - nouvelle entrée -> ADD_PLAYER
- * - texte changé -> UPDATE_DISPLAY_NAME
- * - entrée disparue -> REMOVE_PLAYER
+ * V3 :
+ * - refresh ciblé ;
+ * - refresh global immédiat après join/quit ;
+ * - inspection du cache par viewer ;
+ * - le diff ADD/UPDATE/REMOVE reste inchangé.
  */
 public final class VirtualTabService {
 
@@ -111,8 +112,53 @@ public final class VirtualTabService {
     }
 
     public void shutdown() {
+
         stopTask();
         clearAll();
+    }
+
+    public void refresh(
+            Player viewer) {
+
+        if (viewer == null
+                || !viewer.isOnline()
+                || !config.isEnabled()
+                || !config.isVirtualLayoutEnabled()) {
+
+            return;
+        }
+
+        updateViewer(
+            viewer,
+            Bukkit.getOnlinePlayers()
+                .size()
+        );
+    }
+
+    public void refreshAll() {
+
+        if (!config.isEnabled()
+                || !config.isVirtualLayoutEnabled()) {
+
+            return;
+        }
+
+        int onlinePlayers =
+            Bukkit.getOnlinePlayers()
+                .size();
+
+        for (Player viewer
+                : Bukkit.getOnlinePlayers()) {
+
+            if (viewer != null
+                    && viewer.isOnline()) {
+
+                updateViewer(
+                    viewer,
+                    onlinePlayers
+                );
+            }
+        }
     }
 
     public void clear(
@@ -131,20 +177,23 @@ public final class VirtualTabService {
             return;
         }
 
+        if (!viewer.isOnline()) {
+            return;
+        }
+
         for (VirtualEntry entry : previous) {
+            safeRemove(
+                viewer,
+                entry
+            );
+        }
+    }
 
-            try {
-                packetSender.remove(
-                    viewer,
-                    entry
-                );
-            } catch (RuntimeException failure) {
+    public void removeCache(
+            UUID viewerId) {
 
-                plugin.getLogger()
-                    .warning(
-                        failure.getMessage()
-                    );
-            }
+        if (viewerId != null) {
+            cache.remove(viewerId);
         }
     }
 
@@ -175,6 +224,21 @@ public final class VirtualTabService {
 
     public int getCachedViewerCount() {
         return cache.size();
+    }
+
+    public int getCachedEntryCount(
+            UUID viewerId) {
+
+        if (viewerId == null) {
+            return 0;
+        }
+
+        List<VirtualEntry> entries =
+            cache.get(viewerId);
+
+        return entries == null
+            ? 0
+            : entries.size();
     }
 
     public long getLastCycleMillis() {
@@ -409,10 +473,12 @@ public final class VirtualTabService {
             VirtualEntry entry) {
 
         try {
+
             packetSender.add(
                 viewer,
                 entry
             );
+
         } catch (RuntimeException failure) {
 
             plugin.getLogger()
@@ -427,10 +493,12 @@ public final class VirtualTabService {
             VirtualEntry entry) {
 
         try {
+
             packetSender.update(
                 viewer,
                 entry
             );
+
         } catch (RuntimeException failure) {
 
             plugin.getLogger()
@@ -445,10 +513,12 @@ public final class VirtualTabService {
             VirtualEntry entry) {
 
         try {
+
             packetSender.remove(
                 viewer,
                 entry
             );
+
         } catch (RuntimeException failure) {
 
             plugin.getLogger()

@@ -15,13 +15,12 @@ import me.krunsh.ktab.packet.TabPacketSender;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 
 /**
- * Boucle principale Ktab.
+ * Service Header/Footer et player-list-name.
  *
- * V1 :
- * - render périodique configurable ;
- * - PlaceholderAPI uniquement pour les données externes ;
- * - diff par viewer ;
- * - aucun packet si le rendu n'a pas changé.
+ * V3 :
+ * - refresh ciblé ;
+ * - refresh global à la demande ;
+ * - invalidation immédiate au quit.
  */
 public final class TabService {
 
@@ -56,7 +55,8 @@ public final class TabService {
         this.plugin = plugin;
         this.config = config;
         this.renderer = renderer;
-        this.packetSender =
+
+        packetSender =
             new TabPacketSender();
     }
 
@@ -111,6 +111,55 @@ public final class TabService {
         cache.clear();
     }
 
+    public void refresh(
+            Player player) {
+
+        if (player == null
+                || !player.isOnline()
+                || !config.isEnabled()) {
+
+            return;
+        }
+
+        renderAndSend(
+            player,
+            false
+        );
+    }
+
+    public void refreshAll() {
+
+        if (!config.isEnabled()) {
+            return;
+        }
+
+        for (Player player
+                : Bukkit.getOnlinePlayers()) {
+
+            refresh(player);
+        }
+    }
+
+    public void remove(
+            UUID playerId) {
+
+        if (playerId != null) {
+            cache.remove(playerId);
+        }
+    }
+
+    public boolean isCached(
+            UUID playerId) {
+
+        if (playerId == null) {
+            return false;
+        }
+
+        return cache.contains(
+            playerId
+        );
+    }
+
     public int getCachedViewerCount() {
         return cache.size();
     }
@@ -146,48 +195,11 @@ public final class TabService {
                 player.getUniqueId()
             );
 
-            String header =
-                renderer.renderLines(
+            if (renderAndSend(
                     player,
-                    config.getHeaderLines(),
-                    config.isPlaceholderApiEnabled()
-                );
+                    false)) {
 
-            String footer =
-                renderer.renderLines(
-                    player,
-                    config.getFooterLines(),
-                    config.isPlaceholderApiEnabled()
-                );
-
-            String listName =
-                renderListName(player);
-
-            if (!cache.changed(
-                    player.getUniqueId(),
-                    header,
-                    footer,
-                    listName)) {
-
-                continue;
-            }
-
-            packetSender.send(
-                player,
-                header,
-                footer
-            );
-
-            packets++;
-
-            if (config.isPlayerListNameEnabled()
-                    && !listName.equals(
-                        player.getPlayerListName()
-                    )) {
-
-                player.setPlayerListName(
-                    listName
-                );
+                packets++;
             }
         }
 
@@ -204,6 +216,60 @@ public final class TabService {
                 (System.nanoTime() - started)
                     / 1000000L
             );
+    }
+
+    private boolean renderAndSend(
+            Player player,
+            boolean force) {
+
+        String header =
+            renderer.renderLines(
+                player,
+                config.getHeaderLines(),
+                config.isPlaceholderApiEnabled()
+            );
+
+        String footer =
+            renderer.renderLines(
+                player,
+                config.getFooterLines(),
+                config.isPlaceholderApiEnabled()
+            );
+
+        String listName =
+            renderListName(
+                player
+            );
+
+        boolean changed =
+            cache.changed(
+                player.getUniqueId(),
+                header,
+                footer,
+                listName
+            );
+
+        if (!changed && !force) {
+            return false;
+        }
+
+        packetSender.send(
+            player,
+            header,
+            footer
+        );
+
+        if (config.isPlayerListNameEnabled()
+                && !listName.equals(
+                    player.getPlayerListName()
+                )) {
+
+            player.setPlayerListName(
+                listName
+            );
+        }
+
+        return true;
     }
 
     private String renderListName(

@@ -7,9 +7,6 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  * Cache du dernier rendu réellement envoyé à chaque viewer.
- *
- * Le cache permet de ne produire aucun packet lorsqu'un cycle donne
- * exactement le même header/footer/player-list-name que le précédent.
  */
 public final class RenderedTabCache {
 
@@ -42,6 +39,15 @@ public final class RenderedTabCache {
         return !next.equals(previous);
     }
 
+    public boolean contains(
+            UUID playerId) {
+
+        return playerId != null
+            && entries.containsKey(
+                playerId
+            );
+    }
+
     public void remove(
             UUID playerId) {
 
@@ -57,8 +63,11 @@ public final class RenderedTabCache {
             new ConcurrentHashMap<UUID, Boolean>();
 
         if (onlineIds != null) {
+
             for (UUID id : onlineIds) {
+
                 if (id != null) {
+
                     online.put(
                         id,
                         Boolean.TRUE
@@ -67,7 +76,9 @@ public final class RenderedTabCache {
             }
         }
 
-        for (UUID id : entries.keySet()) {
+        for (UUID id
+                : entries.keySet()) {
+
             if (!online.containsKey(id)) {
                 entries.remove(id);
             }
