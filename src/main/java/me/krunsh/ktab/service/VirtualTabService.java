@@ -16,6 +16,8 @@ import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.layout.LayoutRenderResult;
 import me.krunsh.ktab.layout.RenderedVirtualCell;
 import me.krunsh.ktab.layout.VirtualLayoutRenderer;
+import me.krunsh.ktab.logging.KtabConsole;
+import me.krunsh.ktab.performance.SelectiveRenderMetrics;
 import me.krunsh.ktab.packet.PacketBatchResult;
 import me.krunsh.ktab.packet.VirtualEntry;
 import me.krunsh.ktab.packet.VirtualTabPacketSender;
@@ -110,6 +112,7 @@ public final class VirtualTabService {
 
         clearAll();
         skinResolver.clearCache();
+        layoutRenderer.clearCaches();
 
         if (!config.isEnabled()
                 || !config.isVirtualLayoutEnabled()) {
@@ -117,13 +120,14 @@ public final class VirtualTabService {
             return;
         }
 
-        plugin.getLogger().info(
+        KtabConsole.success(
+            plugin,
             "VirtualTabService prêt - NMS="
                 + packetSender.getNmsVersion()
-                + ", scheduler=central V9, batching="
+                + ", batching="
                 + config.isPerformancePacketBatchingEnabled()
-                + ", maxBatch="
-                + config.getPerformancePacketMaxEntriesPerPacket()
+                + ", renderCache="
+                + config.isPerformanceRenderCacheEnabled()
                 + ", skins="
                 + config.getSkinCount()
                 + "."
@@ -259,6 +263,9 @@ public final class VirtualTabService {
         if (viewerId != null) {
             cache.remove(viewerId);
             skinPreviews.remove(viewerId);
+            layoutRenderer.invalidateViewer(
+                viewerId
+            );
         }
     }
 
@@ -272,6 +279,7 @@ public final class VirtualTabService {
 
         cache.clear();
         skinPreviews.clear();
+        layoutRenderer.clearCaches();
     }
 
     public LayoutRenderResult previewDetailed(
@@ -435,6 +443,33 @@ public final class VirtualTabService {
             / (double) packets;
     }
 
+    public void invalidateRenderCache(
+            UUID viewerId) {
+
+        layoutRenderer.invalidateViewer(
+            viewerId
+        );
+    }
+
+    public void clearRenderCache() {
+        layoutRenderer.clearCaches();
+    }
+
+    public int getRenderedCellCacheViewerCount() {
+        return layoutRenderer
+            .getCachedViewerCount();
+    }
+
+    public int getRenderedCellCacheCellCount() {
+        return layoutRenderer
+            .getCachedCellCount();
+    }
+
+    public SelectiveRenderMetrics getSelectiveRenderMetrics() {
+        return layoutRenderer
+            .getMetrics();
+    }
+
     public void resetPerformanceMetrics() {
 
         totalAdds = 0L;
@@ -449,6 +484,8 @@ public final class VirtualTabService {
         totalRetryEntries = 0L;
 
         lastPacketFailureLogMillis = 0L;
+
+        layoutRenderer.resetMetrics();
 
         resetLastOperations();
         lastCycleMillis = 0L;

@@ -408,3 +408,63 @@ retry entries           -> cellules laissées dirty pour un prochain refresh
 
 Sur un premier rendu 45 cellules, une valeur proche de `45 ops/packet` est le
 cas idéal pour l'action ADD.
+
+
+---
+
+# V9.4 — Selective Rendering & ServerNPC Delta
+
+## RenderedCellCache
+
+Le cache final est différent du cache PlaceholderAPI :
+
+```text
+Placeholder cache
+  -> mémorise une valeur "%kjob_level_mineur%"
+
+RenderedCellCache
+  -> mémorise le résultat final d'une cellule
+     après condition + placeholders + couleurs
+```
+
+Lorsqu'une cellule est encore valide, Ktab ne réévalue ni sa condition ni son
+texte.
+
+### Dépendances
+
+Les dépendances sont analysées automatiquement depuis le YAML :
+
+- `%server_online%` / `%server_max_players%` -> dépendance globale ;
+- `%player_ping%` / `%kjob_*%` -> dépendance dynamique avec TTL ;
+- `permission` / `not_permission` -> dépendance permission ;
+- texte sans dépendance -> statique.
+
+Une revision globale n'est augmentée que lorsque `online/maxPlayers` change.
+
+## ServerNPC
+
+V9.4 conserve un snapshot UUID -> profil.
+
+Scan sans changement :
+
+```text
+getNPCList()
+  -> mêmes UUID
+  -> 0 packet
+```
+
+Nouveau NPC :
+
+```text
+getNPCList()
+  -> +1 UUID
+  -> retire uniquement ce profil pour les viewers
+```
+
+`servernpc_force_rehide_ticks` garde un filet de sécurité pour les plugins NPC
+qui réinjectent un PlayerInfo avec le même UUID.
+
+## Logs startup
+
+Le logger coloré passe par `Bukkit.getConsoleSender()` et reste configurable via
+`logging.*`.

@@ -487,3 +487,82 @@ Diagnostic :
 ```
 
 Voir [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
+
+
+## Performance V9.4
+
+V9.4 ajoute une couche de **rendu sélectif** au-dessus des snapshots V9.2.
+
+Une cellule possède maintenant des dépendances analysées automatiquement :
+
+```text
+cellule
+├── global      %server_online%
+├── dynamique   %player_ping%, %kjob_*%
+├── permission  permission/not_permission
+└── statique    aucun placeholder dynamique
+```
+
+Le résultat final d'une cellule peut être réutilisé jusqu'à expiration de son
+TTL. Une cellule globale est également liée à la revision du snapshot global :
+un changement du nombre de joueurs invalide donc uniquement les cellules qui
+dépendent de cette donnée.
+
+Configuration :
+
+```yaml
+performance:
+
+  render_cache:
+    enabled: true
+    default_ttl_ticks: 40
+    static_ttl_ticks: 1200
+    permission_ttl_ticks: 40
+    max_cells_per_player: 96
+```
+
+`/ktab perf` expose :
+
+```text
+Selective render
+cells checked
+cells rendered
+cells skipped
+skip rate
+render cache viewers/cells
+condition eval/cache
+```
+
+### ServerNPC delta
+
+Les scans ServerNPC ne renvoient plus systématiquement tous les UUID toutes les
+5 secondes. Ktab conserve un snapshot et envoie un REMOVE uniquement pour les
+nouveaux UUID.
+
+Un force-rehide basse fréquence reste configurable :
+
+```yaml
+performance:
+  visibility:
+    servernpc_scan_ticks: 100
+    servernpc_force_rehide_ticks: 1200
+```
+
+### Console colorée
+
+PandaSpigot peut afficher les couleurs envoyées au ConsoleSender :
+
+```yaml
+logging:
+  colors: true
+
+  startup:
+    enabled: true
+    banner: true
+    hooks: true
+    performance: true
+    layout: true
+    compact: false
+```
+
+Le mode `compact: true` produit une seule ligne de résumé.

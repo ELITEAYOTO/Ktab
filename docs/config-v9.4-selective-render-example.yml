@@ -1,0 +1,38 @@
+# Ktab V9.4 — exemple performance
+
+logging:
+  colors: true
+
+  startup:
+    enabled: true
+    banner: true
+    hooks: true
+    performance: true
+    layout: true
+    compact: false
+
+performance:
+
+  render_cache:
+    enabled: true
+
+    # Cellules dynamiques sans règle PlaceholderAPI plus précise.
+    default_ttl_ticks: 40
+
+    # Titres/textes sans dépendance dynamique.
+    static_ttl_ticks: 1200
+
+    # Permissions runtime.
+    permission_ttl_ticks: 40
+
+    # 45 cellules + conditions internes, borné par viewer.
+    max_cells_per_player: 96
+
+  visibility:
+    event_driven: true
+
+    # Snapshot/delta toutes les 5 secondes.
+    servernpc_scan_ticks: 100
+
+    # Filet de sécurité toutes les 60 secondes.
+    servernpc_force_rehide_ticks: 1200

@@ -11,6 +11,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
+import me.krunsh.ktab.logging.KtabConsole;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 import me.krunsh.ktab.service.TabService;
 import me.krunsh.ktab.service.VirtualTabService;
@@ -103,12 +104,13 @@ public final class KtabSchedulerService {
                     1L
                 );
 
-        plugin.getLogger().info(
+        KtabConsole.success(
+            plugin,
             "Scheduler V9 actif - performance="
                 + config.isPerformanceEnabled()
                 + ", window="
                 + config.getPerformanceRefreshWindowTicks()
-                + " ticks, maxRegular="
+                + "t, maxRegular="
                 + config.getPerformanceMaxViewersPerTick()
                 + ", maxDirty="
                 + config.getPerformanceMaxDirtyPerTick()
@@ -196,6 +198,10 @@ public final class KtabSchedulerService {
             placeholderRenderer.invalidatePlayer(
                 viewerId
             );
+
+            virtualTabService.invalidateRenderCache(
+                viewerId
+            );
         }
 
         if (!config.isPerformanceEnabled()
@@ -227,13 +233,21 @@ public final class KtabSchedulerService {
     public void markAllDirty(
             DirtyReason reason) {
 
-        if (reason == DirtyReason.MANUAL
-                || reason == DirtyReason.CONFIG) {
+        if (reason == DirtyReason.CONFIG) {
+
+            placeholderRenderer.clearCaches();
+            virtualTabService.clearRenderCache();
+
+        } else if (reason == DirtyReason.MANUAL) {
 
             for (UUID viewerId
                     : refreshWheel.snapshot()) {
 
                 placeholderRenderer.invalidatePlayer(
+                    viewerId
+                );
+
+                virtualTabService.invalidateRenderCache(
                     viewerId
                 );
             }
@@ -282,6 +296,10 @@ public final class KtabSchedulerService {
         );
 
         placeholderRenderer.invalidatePlayer(
+            viewer.getUniqueId()
+        );
+
+        virtualTabService.invalidateRenderCache(
             viewer.getUniqueId()
         );
 
@@ -575,7 +593,16 @@ public final class KtabSchedulerService {
                 && npcScanTicks > 0L
                 && schedulerTick % npcScanTicks == 0L) {
 
-            visibilityController.hideServerNpcsAll();
+            long forceTicks =
+                config.getPerformanceServerNpcForceRehideTicks();
+
+            boolean force =
+                forceTicks > 0L
+                    && schedulerTick % forceTicks == 0L;
+
+            visibilityController.auditServerNpcsDelta(
+                force
+            );
         }
     }
 

@@ -22,6 +22,32 @@
 
 
 # ---------------------------------------------------------------------
+# LOGS CONSOLE
+# ---------------------------------------------------------------------
+#
+# PandaSpigot sait afficher les couleurs envoyées au ConsoleSender.
+#
+logging:
+
+  colors: true
+
+  startup:
+
+    enabled: true
+
+    # true = résumé sur plusieurs lignes.
+    # false n'empêche pas les logs individuels des services.
+    banner: true
+
+    hooks: true
+    performance: true
+    layout: true
+
+    # true = une seule ligne de résumé au lieu du bloc complet.
+    compact: false
+
+
+# ---------------------------------------------------------------------
 # GÉNÉRAL
 # ---------------------------------------------------------------------
 
@@ -177,6 +203,16 @@ performance:
     # 0 = désactivé.
     servernpc_scan_ticks: 100
 
+    # V9.4 : les scans ordinaires n'envoient plus rien si la liste des UUID
+    # ServerNPC n'a pas changé.
+    #
+    # Certains plugins NPC peuvent toutefois réinjecter le même UUID après un
+    # refresh de skin. Ce force-rehide basse fréquence sert de filet de sécurité.
+    #
+    # 1200 ticks = 60 secondes.
+    # 0 = désactivé.
+    servernpc_force_rehide_ticks: 1200
+
 
 
   # -------------------------------------------------------------------
@@ -243,6 +279,34 @@ performance:
         # Le reste de Kjobs.
         - match: "%kjob_*%"
           ttl_ticks: 40
+
+
+  # -------------------------------------------------------------------
+  # SELECTIVE RENDER / CELL CACHE V9.4
+  # -------------------------------------------------------------------
+  #
+  # Après V9.2, PlaceholderAPI est déjà très bien caché. V9.4 va plus loin :
+  # si une cellule n'a aucune dépendance expirée, Ktab réutilise directement
+  # son résultat final sans refaire conditions + placeholders + couleurs.
+  #
+  render_cache:
+
+    enabled: true
+
+    # TTL de secours d'une cellule dynamique.
+    default_ttl_ticks: 40
+
+    # Cellules entièrement statiques : elles peuvent rester longtemps en cache.
+    # /ktab reload et /ktab perf clearcache les invalident immédiatement.
+    static_ttl_ticks: 1200
+
+    # Permissions : Bukkit n'émet pas toujours un event exploitable lors d'un
+    # changement runtime, on garde donc un TTL court et configurable.
+    permission_ttl_ticks: 40
+
+    # 45 cellules visibles + conditions/titres internes.
+    # 96 laisse une marge tout en bornant strictement la mémoire.
+    max_cells_per_player: 96
 
 
   # -------------------------------------------------------------------

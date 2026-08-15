@@ -10,18 +10,16 @@ import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 
 import me.krunsh.ktab.KtabPlugin;
+import me.krunsh.ktab.logging.KtabConsole;
 import me.krunsh.ktab.visibility.TabProfile;
 
 /**
  * Hook optionnel ServerNPC.
  *
- * Aucune dépendance compile-time vers ServerNPC :
- * Ktab utilise uniquement l'API publique disponible par réflexion.
- *
- * ServerNPC 1.13.11 expose :
- * ServerNPC.getAPI().getNPCList()
- * SnakeNPC#getUuid()
- * SnakeNPC#getName()
+ * V9.4 :
+ * - aucune dépendance compile-time ;
+ * - méthodes NPC getUuid/getName mises en cache par classe ;
+ * - warnings throttlés pour éviter le spam console.
  */
 public final class ServerNpcHook {
 
@@ -35,6 +33,14 @@ public final class ServerNpcHook {
     private Method getApiMethod;
     private Method getNpcListMethod;
 
+    private Class<?> cachedNpcClass;
+    private Method cachedGetUuidMethod;
+    private Method cachedGetNameMethod;
+
+    private long reflectionResolves;
+    private long readFailures;
+    private long lastFailureLogMillis;
+
     public ServerNpcHook(
             KtabPlugin plugin) {
 
@@ -44,17 +50,31 @@ public final class ServerNpcHook {
             );
         }
 
-        this.plugin = plugin;
+        this.plugin =
+            plugin;
 
         refresh();
     }
 
     public void refresh() {
 
-        available = false;
+        available =
+            false;
 
-        getApiMethod = null;
-        getNpcListMethod = null;
+        getApiMethod =
+            null;
+
+        getNpcListMethod =
+            null;
+
+        cachedNpcClass =
+            null;
+
+        cachedGetUuidMethod =
+            null;
+
+        cachedGetNameMethod =
+            null;
 
         Plugin serverNpc =
             Bukkit.getPluginManager()
@@ -81,7 +101,9 @@ public final class ServerNpcHook {
                 );
 
             Object api =
-                getApiMethod.invoke(null);
+                getApiMethod.invoke(
+                    null
+                );
 
             if (api == null) {
                 return;
@@ -93,23 +115,20 @@ public final class ServerNpcHook {
                         "getNPCList"
                     );
 
-            available = true;
+            available =
+                true;
 
-            plugin.getLogger()
-                .info(
-                    "Hook ServerNPC actif."
-                );
+            KtabConsole.success(
+                plugin,
+                "Hook ServerNPC actif."
+            );
 
         } catch (Exception failure) {
 
-            plugin.getLogger()
-                .warning(
-                    "ServerNPC détecté mais API inaccessible: "
-                        + failure.getClass()
-                            .getSimpleName()
-                        + " "
-                        + failure.getMessage()
-                );
+            logFailure(
+                "ServerNPC détecté mais API inaccessible",
+                failure
+            );
         }
     }
 
@@ -129,7 +148,9 @@ public final class ServerNpcHook {
         try {
 
             Object api =
-                getApiMethod.invoke(null);
+                getApiMethod.invoke(
+                    null
+                );
 
             if (api == null) {
                 return Collections.emptyList();
@@ -154,20 +175,12 @@ public final class ServerNpcHook {
                     continue;
                 }
 
-                Method getUuid =
-                    npc.getClass()
-                        .getMethod(
-                            "getUuid"
-                        );
-
-                Method getName =
-                    npc.getClass()
-                        .getMethod(
-                            "getName"
-                        );
+                ensureNpcAccessors(
+                    npc
+                );
 
                 Object rawUuid =
-                    getUuid.invoke(
+                    cachedGetUuidMethod.invoke(
                         npc
                     );
 
@@ -176,7 +189,7 @@ public final class ServerNpcHook {
                 }
 
                 Object rawName =
-                    getName.invoke(
+                    cachedGetNameMethod.invoke(
                         npc
                     );
 
@@ -196,16 +209,88 @@ public final class ServerNpcHook {
 
         } catch (Exception failure) {
 
-            plugin.getLogger()
-                .warning(
-                    "Lecture ServerNPC impossible: "
-                        + failure.getClass()
-                            .getSimpleName()
-                        + " "
-                        + failure.getMessage()
-                );
+            readFailures++;
+
+            logFailure(
+                "Lecture ServerNPC impossible",
+                failure
+            );
 
             return Collections.emptyList();
         }
+    }
+
+    public long getReflectionResolves() {
+        return reflectionResolves;
+    }
+
+    public long getReadFailures() {
+        return readFailures;
+    }
+
+    public void resetMetrics() {
+
+        reflectionResolves =
+            0L;
+
+        readFailures =
+            0L;
+    }
+
+    private void ensureNpcAccessors(
+            Object npc)
+            throws Exception {
+
+        Class<?> npcClass =
+            npc.getClass();
+
+        if (cachedNpcClass == npcClass
+                && cachedGetUuidMethod != null
+                && cachedGetNameMethod != null) {
+
+            return;
+        }
+
+        cachedNpcClass =
+            npcClass;
+
+        cachedGetUuidMethod =
+            npcClass.getMethod(
+                "getUuid"
+            );
+
+        cachedGetNameMethod =
+            npcClass.getMethod(
+                "getName"
+            );
+
+        reflectionResolves++;
+    }
+
+    private void logFailure(
+            String prefix,
+            Exception failure) {
+
+        long now =
+            System.currentTimeMillis();
+
+        if (now - lastFailureLogMillis
+                < 5000L) {
+
+            return;
+        }
+
+        lastFailureLogMillis =
+            now;
+
+        KtabConsole.warning(
+            plugin,
+            prefix
+                + ": "
+                + failure.getClass()
+                    .getSimpleName()
+                + " "
+                + failure.getMessage()
+        );
     }
 }

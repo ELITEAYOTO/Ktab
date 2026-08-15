@@ -20,6 +20,7 @@ import me.krunsh.ktab.layout.RenderedVirtualCell;
 import me.krunsh.ktab.performance.DirtyReason;
 import me.krunsh.ktab.performance.KtabSchedulerService;
 import me.krunsh.ktab.performance.PerformanceMetrics;
+import me.krunsh.ktab.performance.SelectiveRenderMetrics;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 import me.krunsh.ktab.service.TabService;
 import me.krunsh.ktab.service.VirtualTabService;
@@ -532,6 +533,7 @@ public final class KtabCommand
                     args[1])) {
 
             renderer.clearCaches();
+            virtualTabService.clearRenderCache();
 
             schedulerService
                 .markAllDirty(
@@ -764,6 +766,48 @@ public final class KtabCommand
                     .getPerformancePlaceholderMaxEntriesPerPlayer()
         );
 
+        SelectiveRenderMetrics renderMetrics =
+            virtualTabService
+                .getSelectiveRenderMetrics();
+
+        sender.sendMessage(
+            "§7Selective render: "
+                + yn(
+                    config
+                        .isPerformanceRenderCacheEnabled()
+                )
+                + " §8| §7checked=§f"
+                + renderMetrics
+                    .getCellsChecked()
+                + " §8| §7rendered=§e"
+                + renderMetrics
+                    .getCellsRendered()
+                + " §8| §7skipped=§a"
+                + renderMetrics
+                    .getCellsSkipped()
+                + " §8(§f"
+                + formatPercent(
+                    renderMetrics
+                        .getSkipRate()
+                )
+                + "%§8)"
+        );
+
+        sender.sendMessage(
+            "§7Render cache: viewers=§f"
+                + virtualTabService
+                    .getRenderedCellCacheViewerCount()
+                + " §8| §7cells=§f"
+                + virtualTabService
+                    .getRenderedCellCacheCellCount()
+                + " §8| §7condition eval/cache=§f"
+                + renderMetrics
+                    .getConditionsEvaluated()
+                + "§8/§a"
+                + renderMetrics
+                    .getConditionsSkipped()
+        );
+
         sender.sendMessage(
             "§7Visibility: targeted=§f"
                 + visibilityController
@@ -786,12 +830,39 @@ public final class KtabCommand
         );
 
         sender.sendMessage(
+            "§7ServerNPC delta: scans=§f"
+                + visibilityController
+                    .getNpcScans()
+                + " §8| §7no-change=§a"
+                + visibilityController
+                    .getNpcNoChangeScans()
+                + " §8| §7new=§e"
+                + visibilityController
+                    .getNpcDeltaAdds()
+                + " §8| §7force=§f"
+                + visibilityController
+                    .getNpcForceRehides()
+        );
+
+        sender.sendMessage(
+            "§7ServerNPC reflection: resolves=§f"
+                + visibilityController
+                    .getServerNpcReflectionResolves()
+                + " §8| §7failures=§c"
+                + visibilityController
+                    .getServerNpcReadFailures()
+        );
+
+        sender.sendMessage(
             "§7Fallback visibility: §f"
                 + config
                     .getPerformanceVisibilityFallbackScanTicks()
                 + "t §8| §7ServerNPC scan=§f"
                 + config
                     .getPerformanceServerNpcScanTicks()
+                + "t §8| §7force=§f"
+                + config
+                    .getPerformanceServerNpcForceRehideTicks()
                 + "t"
         );
 

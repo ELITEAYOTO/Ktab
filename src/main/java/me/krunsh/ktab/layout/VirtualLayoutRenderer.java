@@ -3,28 +3,42 @@ package me.krunsh.ktab.layout;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import org.bukkit.entity.Player;
 
+import me.krunsh.ktab.cache.RenderedCellCache;
+import me.krunsh.ktab.cache.RenderedCellCache.CachedCell;
 import me.krunsh.ktab.condition.ConditionEvaluation;
 import me.krunsh.ktab.condition.ConditionEvaluator;
 import me.krunsh.ktab.config.KtabConfig;
+import me.krunsh.ktab.dependency.DependencyAnalyzer;
+import me.krunsh.ktab.dependency.DependencySet;
+import me.krunsh.ktab.performance.SelectiveRenderMetrics;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 
 /**
  * Renderer de grille fixe Ktab.
  *
- * V8 :
- * - colonnes conditionnelles sans déplacement horizontal ;
- * - cellules conditionnelles ;
- * - une cellule fixe masquée réserve toujours sa row ;
- * - une cellule automatique masquée ne consomme aucune row.
+ * V9.4 :
+ * - cache final par cellule/viewer ;
+ * - dépendances PlaceholderAPI / global / permission analysées une fois ;
+ * - une cellule valide est réutilisée sans réévaluer conditions/PAPI ;
+ * - revision globale invalide uniquement les cellules qui en dépendent ;
+ * - rows fixes et colonnes conditionnelles gardent exactement la géométrie.
  */
 public final class VirtualLayoutRenderer {
 
     private final KtabConfig config;
     private final PlaceholderRenderer renderer;
     private final ConditionEvaluator conditionEvaluator;
+
+    private final DependencyAnalyzer dependencyAnalyzer;
+    private final RenderedCellCache renderedCellCache =
+        new RenderedCellCache();
+
+    private final SelectiveRenderMetrics metrics =
+        new SelectiveRenderMetrics();
 
     public VirtualLayoutRenderer(
             KtabConfig config,
@@ -38,14 +52,67 @@ public final class VirtualLayoutRenderer {
             );
         }
 
-        this.config = config;
-        this.renderer = renderer;
+        this.config =
+            config;
+
+        this.renderer =
+            renderer;
 
         this.conditionEvaluator =
             new ConditionEvaluator(
                 config,
                 renderer
             );
+
+        this.dependencyAnalyzer =
+            new DependencyAnalyzer(
+                config,
+                renderer
+            );
+
+        applyConfig();
+    }
+
+    public void applyConfig() {
+
+        renderedCellCache
+            .setMaxCellsPerPlayer(
+                config
+                    .getPerformanceRenderMaxCellsPerPlayer()
+            );
+    }
+
+    public void clearCaches() {
+
+        renderedCellCache.clear();
+        dependencyAnalyzer.clear();
+        applyConfig();
+    }
+
+    public void invalidateViewer(
+            UUID viewerId) {
+
+        renderedCellCache.invalidate(
+            viewerId
+        );
+    }
+
+    public void resetMetrics() {
+        metrics.reset();
+    }
+
+    public SelectiveRenderMetrics getMetrics() {
+        return metrics;
+    }
+
+    public int getCachedViewerCount() {
+        return renderedCellCache
+            .getViewerCount();
+    }
+
+    public int getCachedCellCount() {
+        return renderedCellCache
+            .getCellCount();
     }
 
     public List<RenderedVirtualCell> render(
@@ -65,10 +132,7 @@ public final class VirtualLayoutRenderer {
         if (viewer == null
                 || !config.isVirtualLayoutEnabled()) {
 
-            return new LayoutRenderResult(
-                Collections.<RenderedVirtualCell>emptyList(),
-                Collections.<LayoutDecision>emptyList()
-            );
+            return emptyResult();
         }
 
         List<TabColumn> columns =
@@ -81,11 +145,7 @@ public final class VirtualLayoutRenderer {
             );
 
         if (columnCount <= 0) {
-
-            return new LayoutRenderResult(
-                Collections.<RenderedVirtualCell>emptyList(),
-                Collections.<LayoutDecision>emptyList()
-            );
+            return emptyResult();
         }
 
         int rowCount =
@@ -109,11 +169,7 @@ public final class VirtualLayoutRenderer {
             );
 
         if (entryLimit <= 0) {
-
-            return new LayoutRenderResult(
-                Collections.<RenderedVirtualCell>emptyList(),
-                Collections.<LayoutDecision>emptyList()
-            );
+            return emptyResult();
         }
 
         String blankText =
@@ -203,34 +259,36 @@ public final class VirtualLayoutRenderer {
 
         List<RenderedVirtualCell> rows =
             emptyRows(
-                column,
-                columnIndex,
                 rowCount
             );
 
-        ConditionEvaluation columnEvaluation =
-            conditionEvaluator.evaluate(
+        String columnPath =
+            "column."
+                + column.getId();
+
+        ConditionResult columnCondition =
+            resolveCondition(
                 viewer,
-                column.getConditions()
+                columnPath + ".__condition",
+                column.getConditions(),
+                dependencyAnalyzer
+                    .analyzeColumn(
+                        column
+                    )
             );
 
         if (column.hasConditions()) {
 
             decisions.add(
                 new LayoutDecision(
-                    "column."
-                        + column.getId(),
-                    columnEvaluation.isMatched(),
-                    columnEvaluation.summarize()
+                    columnPath,
+                    columnCondition.visible,
+                    columnCondition.reason
                 )
             );
         }
 
-        /*
-         * Une colonne masquée garde exactement sa largeur/position.
-         * On retourne donc une colonne entière de cellules blank.
-         */
-        if (!columnEvaluation.isMatched()) {
+        if (!columnCondition.visible) {
 
             fillBlanks(
                 rows,
@@ -243,50 +301,13 @@ public final class VirtualLayoutRenderer {
         }
 
         List<ConfiguredCell> configuredCells =
-            new ArrayList<ConfiguredCell>();
-
-        TabCell title =
-            column.getTitle();
-
-        if (title != null
-                && title.getText() != null
-                && !title.getText()
-                    .trim()
-                    .isEmpty()) {
-
-            configuredCells.add(
-                new ConfiguredCell(
-                    title,
-                    "column."
-                        + column.getId()
-                        + ".title"
-                )
+            collectConfiguredCells(
+                column
             );
-        }
-
-        int lineIndex =
-            0;
-
-        for (TabCell cell
-                : column.getLines()) {
-
-            configuredCells.add(
-                new ConfiguredCell(
-                    cell,
-                    "column."
-                        + column.getId()
-                        + ".lines["
-                        + lineIndex
-                        + "]"
-                )
-            );
-
-            lineIndex++;
-        }
 
         /*
-         * PASS 1 : cellules à row fixe.
-         * Même masquées, leur row reste réservée.
+         * PASS 1 : rows explicites.
+         * Une cellule masquée réserve toujours son espace.
          */
         for (ConfiguredCell configured
                 : configuredCells) {
@@ -300,39 +321,49 @@ public final class VirtualLayoutRenderer {
                 continue;
             }
 
-            ConditionEvaluation evaluation =
-                evaluateCell(
+            ResolvedConfiguredCell resolved =
+                resolveCell(
                     viewer,
-                    configured,
-                    decisions
+                    configured
                 );
 
-            if (evaluation.isMatched()) {
+            if (cell.hasConditions()) {
+
+                decisions.add(
+                    new LayoutDecision(
+                        configured.path,
+                        resolved.visible,
+                        resolved.reason
+                    )
+                );
+            }
+
+            if (resolved.visible) {
 
                 placeExplicitVisible(
                     rows,
-                    viewer,
                     column,
                     columnIndex,
-                    cell
+                    cell,
+                    resolved.renderedText
                 );
 
             } else {
 
                 reserveExplicitHidden(
                     rows,
-                    viewer,
                     column,
                     columnIndex,
                     cell,
+                    resolved.renderedText,
                     blankText
                 );
             }
         }
 
         /*
-         * PASS 2 : cellules automatiques.
-         * Si leur condition est fausse elles ne prennent aucune place.
+         * PASS 2 : rows automatiques.
+         * Une cellule masquée ne consomme aucune position.
          */
         int nextAutoRow =
             0;
@@ -349,24 +380,34 @@ public final class VirtualLayoutRenderer {
                 continue;
             }
 
-            ConditionEvaluation evaluation =
-                evaluateCell(
+            ResolvedConfiguredCell resolved =
+                resolveCell(
                     viewer,
-                    configured,
-                    decisions
+                    configured
                 );
 
-            if (!evaluation.isMatched()) {
+            if (cell.hasConditions()) {
+
+                decisions.add(
+                    new LayoutDecision(
+                        configured.path,
+                        resolved.visible,
+                        resolved.reason
+                    )
+                );
+            }
+
+            if (!resolved.visible) {
                 continue;
             }
 
             nextAutoRow =
                 placeAutomatic(
                     rows,
-                    viewer,
                     column,
                     columnIndex,
                     cell,
+                    resolved.renderedText,
                     nextAutoRow
                 );
         }
@@ -381,13 +422,64 @@ public final class VirtualLayoutRenderer {
         return rows;
     }
 
-    private ConditionEvaluation evaluateCell(
+    private ResolvedConfiguredCell resolveCell(
             Player viewer,
-            ConfiguredCell configured,
-            List<LayoutDecision> decisions) {
+            ConfiguredCell configured) {
 
         TabCell cell =
             configured.cell;
+
+        DependencySet dependencies =
+            dependencyAnalyzer
+                .analyzeCell(
+                    cell
+                );
+
+        long now =
+            System.currentTimeMillis();
+
+        long globalRevision =
+            renderer
+                .getGlobalSnapshot()
+                .getRevision();
+
+        boolean cacheEnabled =
+            config
+                .isPerformanceRenderCacheEnabled();
+
+        CachedCell cached =
+            cacheEnabled
+                ? renderedCellCache.get(
+                    viewer.getUniqueId(),
+                    configured.path,
+                    now,
+                    globalRevision,
+                    dependencies
+                )
+                : null;
+
+        if (cached != null) {
+
+            metrics.recordCell(
+                true
+            );
+
+            if (cell.hasConditions()) {
+                metrics.recordCondition(
+                    true
+                );
+            }
+
+            return new ResolvedConfiguredCell(
+                cached.isVisible(),
+                cached.getRenderedText(),
+                "cache"
+            );
+        }
+
+        metrics.recordCell(
+            false
+        );
 
         ConditionEvaluation evaluation =
             conditionEvaluator.evaluate(
@@ -396,25 +488,218 @@ public final class VirtualLayoutRenderer {
             );
 
         if (cell.hasConditions()) {
+            metrics.recordCondition(
+                false
+            );
+        }
 
-            decisions.add(
-                new LayoutDecision(
-                    configured.path,
-                    evaluation.isMatched(),
-                    evaluation.summarize()
+        /*
+         * Même masqué, on rend le texte une fois afin de conserver le nombre
+         * exact de lignes si un placeholder génère un \n.
+         */
+        String rendered =
+            renderer.render(
+                viewer,
+                cell.getText(),
+                config.isPlaceholderApiEnabled()
+            );
+
+        long ttlTicks =
+            resolveRenderTtlTicks(
+                dependencies
+            );
+
+        if (cacheEnabled
+                && ttlTicks > 0L) {
+
+            renderedCellCache.put(
+                viewer.getUniqueId(),
+                configured.path,
+                evaluation.isMatched(),
+                rendered,
+                ticksToMillis(
+                    ttlTicks
+                ),
+                globalRevision
+            );
+        }
+
+        return new ResolvedConfiguredCell(
+            evaluation.isMatched(),
+            rendered,
+            evaluation.summarize()
+        );
+    }
+
+    private ConditionResult resolveCondition(
+            Player viewer,
+            String path,
+            me.krunsh.ktab.condition.TabConditionGroup group,
+            DependencySet dependencies) {
+
+        if (group == null
+                || group.isEmpty()) {
+
+            return new ConditionResult(
+                true,
+                "toujours visible"
+            );
+        }
+
+        long now =
+            System.currentTimeMillis();
+
+        long globalRevision =
+            renderer
+                .getGlobalSnapshot()
+                .getRevision();
+
+        boolean cacheEnabled =
+            config
+                .isPerformanceRenderCacheEnabled();
+
+        CachedCell cached =
+            cacheEnabled
+                ? renderedCellCache.get(
+                    viewer.getUniqueId(),
+                    path,
+                    now,
+                    globalRevision,
+                    dependencies
+                )
+                : null;
+
+        if (cached != null) {
+
+            metrics.recordCondition(
+                true
+            );
+
+            return new ConditionResult(
+                cached.isVisible(),
+                "cache"
+            );
+        }
+
+        metrics.recordCondition(
+            false
+        );
+
+        ConditionEvaluation evaluation =
+            conditionEvaluator.evaluate(
+                viewer,
+                group
+            );
+
+        long ttlTicks =
+            resolveRenderTtlTicks(
+                dependencies
+            );
+
+        if (cacheEnabled
+                && ttlTicks > 0L) {
+
+            renderedCellCache.put(
+                viewer.getUniqueId(),
+                path,
+                evaluation.isMatched(),
+                "",
+                ticksToMillis(
+                    ttlTicks
+                ),
+                globalRevision
+            );
+        }
+
+        return new ConditionResult(
+            evaluation.isMatched(),
+            evaluation.summarize()
+        );
+    }
+
+    private long resolveRenderTtlTicks(
+            DependencySet dependencies) {
+
+        if (dependencies == null) {
+
+            return config
+                .getPerformanceRenderDefaultTtlTicks();
+        }
+
+        if (!dependencies.isDynamic()
+                && !dependencies.isPermission()) {
+
+            return config
+                .getPerformanceRenderStaticTtlTicks();
+        }
+
+        long fallback =
+            dependencies.isPermission()
+                ? config
+                    .getPerformanceRenderPermissionTtlTicks()
+                : config
+                    .getPerformanceRenderDefaultTtlTicks();
+
+        return dependencies
+            .getTtlTicks(
+                fallback
+            );
+    }
+
+    private List<ConfiguredCell> collectConfiguredCells(
+            TabColumn column) {
+
+        List<ConfiguredCell> result =
+            new ArrayList<ConfiguredCell>();
+
+        TabCell title =
+            column.getTitle();
+
+        if (title != null
+                && title.getText() != null
+                && !title.getText()
+                    .trim()
+                    .isEmpty()) {
+
+            result.add(
+                new ConfiguredCell(
+                    title,
+                    "column."
+                        + column.getId()
+                        + ".title"
                 )
             );
         }
 
-        return evaluation;
+        int lineIndex =
+            0;
+
+        for (TabCell cell
+                : column.getLines()) {
+
+            result.add(
+                new ConfiguredCell(
+                    cell,
+                    "column."
+                        + column.getId()
+                        + ".lines["
+                        + lineIndex
+                        + "]"
+                )
+            );
+
+            lineIndex++;
+        }
+
+        return result;
     }
 
     private void placeExplicitVisible(
             List<RenderedVirtualCell> rows,
-            Player viewer,
             TabColumn column,
             int columnIndex,
-            TabCell configured) {
+            TabCell configured,
+            String rendered) {
 
         int startRow =
             configured.getConfiguredRow()
@@ -427,9 +712,8 @@ public final class VirtualLayoutRenderer {
         }
 
         String[] split =
-            renderSplit(
-                viewer,
-                configured
+            split(
+                rendered
             );
 
         for (int offset = 0;
@@ -437,8 +721,7 @@ public final class VirtualLayoutRenderer {
                 offset++) {
 
             int row =
-                startRow
-                    + offset;
+                startRow + offset;
 
             if (row >= rows.size()) {
                 break;
@@ -463,10 +746,10 @@ public final class VirtualLayoutRenderer {
 
     private void reserveExplicitHidden(
             List<RenderedVirtualCell> rows,
-            Player viewer,
             TabColumn column,
             int columnIndex,
             TabCell configured,
+            String rendered,
             String blankText) {
 
         int startRow =
@@ -479,14 +762,9 @@ public final class VirtualLayoutRenderer {
             return;
         }
 
-        /*
-         * Le texte est rendu uniquement pour connaître le nombre de lignes
-         * occupées si la cellule contient des \n.
-         */
         String[] split =
-            renderSplit(
-                viewer,
-                configured
+            split(
+                rendered
             );
 
         for (int offset = 0;
@@ -494,8 +772,7 @@ public final class VirtualLayoutRenderer {
                 offset++) {
 
             int row =
-                startRow
-                    + offset;
+                startRow + offset;
 
             if (row >= rows.size()) {
                 break;
@@ -520,16 +797,15 @@ public final class VirtualLayoutRenderer {
 
     private int placeAutomatic(
             List<RenderedVirtualCell> rows,
-            Player viewer,
             TabColumn column,
             int columnIndex,
             TabCell configured,
+            String rendered,
             int startSearchRow) {
 
         String[] split =
-            renderSplit(
-                viewer,
-                configured
+            split(
+                rendered
             );
 
         int searchRow =
@@ -568,16 +844,8 @@ public final class VirtualLayoutRenderer {
         return searchRow;
     }
 
-    private String[] renderSplit(
-            Player viewer,
-            TabCell configured) {
-
-        String rendered =
-            renderer.render(
-                viewer,
-                configured.getText(),
-                config.isPlaceholderApiEnabled()
-            );
+    private static String[] split(
+            String rendered) {
 
         return rendered == null
             ? new String[] {""}
@@ -587,9 +855,7 @@ public final class VirtualLayoutRenderer {
             );
     }
 
-    private List<RenderedVirtualCell> emptyRows(
-            TabColumn column,
-            int columnIndex,
+    private static List<RenderedVirtualCell> emptyRows(
             int rowCount) {
 
         List<RenderedVirtualCell> rows =
@@ -655,6 +921,23 @@ public final class VirtualLayoutRenderer {
         return -1;
     }
 
+    private static long ticksToMillis(
+            long ticks) {
+
+        return Math.max(
+            1L,
+            ticks
+        ) * 50L;
+    }
+
+    private static LayoutRenderResult emptyResult() {
+
+        return new LayoutRenderResult(
+            Collections.<RenderedVirtualCell>emptyList(),
+            Collections.<LayoutDecision>emptyList()
+        );
+    }
+
     private static final class ConfiguredCell {
 
         private final TabCell cell;
@@ -669,6 +952,51 @@ public final class VirtualLayoutRenderer {
 
             this.path =
                 path;
+        }
+    }
+
+    private static final class ResolvedConfiguredCell {
+
+        private final boolean visible;
+        private final String renderedText;
+        private final String reason;
+
+        private ResolvedConfiguredCell(
+                boolean visible,
+                String renderedText,
+                String reason) {
+
+            this.visible =
+                visible;
+
+            this.renderedText =
+                renderedText == null
+                    ? ""
+                    : renderedText;
+
+            this.reason =
+                reason == null
+                    ? ""
+                    : reason;
+        }
+    }
+
+    private static final class ConditionResult {
+
+        private final boolean visible;
+        private final String reason;
+
+        private ConditionResult(
+                boolean visible,
+                String reason) {
+
+            this.visible =
+                visible;
+
+            this.reason =
+                reason == null
+                    ? ""
+                    : reason;
         }
     }
 }

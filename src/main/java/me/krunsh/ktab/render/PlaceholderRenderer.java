@@ -81,7 +81,14 @@ public final class PlaceholderRenderer {
             int onlinePlayers,
             int maxPlayers) {
 
-        globalRevision++;
+        if (globalSnapshot.getOnlinePlayers()
+                != onlinePlayers
+                || globalSnapshot.getMaxPlayers()
+                    != maxPlayers
+                || globalSnapshot.getRevision() == 0L) {
+
+            globalRevision++;
+        }
 
         globalSnapshot =
             new GlobalSnapshot(
@@ -300,6 +307,46 @@ public final class PlaceholderRenderer {
 
     public GlobalSnapshot getGlobalSnapshot() {
         return globalSnapshot;
+    }
+
+    public List<String> getPlaceholderTokens(
+            String raw) {
+
+        CompiledTemplate template =
+            templateCompiler.compile(
+                raw == null
+                    ? ""
+                    : raw
+            );
+
+        java.util.ArrayList<String> tokens =
+            new java.util.ArrayList<String>();
+
+        for (CompiledTemplate.Part part
+                : template.getParts()) {
+
+            if (part.isPlaceholder()
+                    && !tokens.contains(
+                        part.getValue()
+                    )) {
+
+                tokens.add(
+                    part.getValue()
+                );
+            }
+        }
+
+        return tokens;
+    }
+
+    public long getConfiguredTtlTicks(
+            String token) {
+
+        return resolveTtlTicks(
+            token == null
+                ? ""
+                : token
+        );
     }
 
     private String resolveToken(

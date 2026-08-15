@@ -13,15 +13,17 @@ import org.bukkit.entity.Player;
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.integration.ServerNpcHook;
+import me.krunsh.ktab.logging.KtabConsole;
 import me.krunsh.ktab.packet.TabVisibilityPacketSender;
 
 /**
  * Contrôle les entrées non-Ktab présentes dans la liste client.
  *
- * V9.1 :
- * - masquage ciblé au join ;
- * - construction d'un batch de profils une seule fois par sweep ;
- * - aucun apply() appelé à chaque rendu du VirtualTabService.
+ * V9.4 :
+ * - masquage réel event-driven conservé ;
+ * - snapshot ServerNPC mémorisé ;
+ * - scans NPC en delta : aucun packet si aucun UUID nouveau ;
+ * - force-rehide basse fréquence configurable comme filet de sécurité.
  */
 public final class TabVisibilityController {
 
@@ -31,6 +33,9 @@ public final class TabVisibilityController {
     private final ServerNpcHook serverNpcHook;
     private final TabVisibilityPacketSender packetSender;
 
+    private final Map<UUID, TabProfile> npcSnapshot =
+        new LinkedHashMap<UUID, TabProfile>();
+
     private int lastHiddenRealPlayers;
     private int lastHiddenNpcs;
 
@@ -39,6 +44,11 @@ public final class TabVisibilityController {
     private long npcSweeps;
     private long packetsSent;
     private long profileEntriesSent;
+
+    private long npcScans;
+    private long npcNoChangeScans;
+    private long npcDeltaAdds;
+    private long npcForceRehides;
 
     public TabVisibilityController(
             KtabPlugin plugin,
@@ -52,8 +62,11 @@ public final class TabVisibilityController {
             );
         }
 
-        this.plugin = plugin;
-        this.config = config;
+        this.plugin =
+            plugin;
+
+        this.config =
+            config;
 
         serverNpcHook =
             new ServerNpcHook(
@@ -65,12 +78,11 @@ public final class TabVisibilityController {
     }
 
     public void refreshHooks() {
+
         serverNpcHook.refresh();
+        npcSnapshot.clear();
     }
 
-    /**
-     * Compatibilité avec les anciennes phases.
-     */
     public void apply(
             Player viewer) {
 
@@ -79,13 +91,6 @@ public final class TabVisibilityController {
         );
     }
 
-    /**
-     * Masque pour un nouveau viewer les vrais joueurs actuellement connectés
-     * ainsi que les NPC ServerNPC.
-     *
-     * Cette opération est O(n) en construction de profils, mais elle n'est
-     * exécutée qu'au join/reload/fallback et non plus à chaque refresh.
-     */
     public void hideExistingFrom(
             Player viewer) {
 
@@ -110,10 +115,6 @@ public final class TabVisibilityController {
         targetedHideOperations++;
     }
 
-    /**
-     * Quand un vrai joueur rejoint, les viewers déjà connectés n'ont besoin
-     * de retirer QUE ce nouveau profil, pas les 699 autres.
-     */
     public void hideRealPlayerFromOthers(
             Player joined) {
 
@@ -157,15 +158,12 @@ public final class TabVisibilityController {
             );
         }
 
-        lastHiddenRealPlayers = 1;
+        lastHiddenRealPlayers =
+            1;
+
         targetedHideOperations++;
     }
 
-    /**
-     * Sweep complet optimisé :
-     * la liste des profils est construite une seule fois puis réutilisée pour
-     * tous les viewers.
-     */
     public void applyAllBatched() {
 
         if (!config.isEnabled()
@@ -205,20 +203,31 @@ public final class TabVisibilityController {
         fullSweeps++;
     }
 
-    /**
-     * Compatibilité avec les anciennes commandes.
-     */
     public void applyAll() {
         applyAllBatched();
     }
 
     /**
-     * Sweep léger réservé aux NPC.
-     *
-     * Utile car certains plugins NPC peuvent réinjecter une entrée PlayerInfo
-     * après le spawn/chargement de skin.
+     * Compatibilité : ancien sweep NPC devient un force-rehide explicite.
      */
     public void hideServerNpcsAll() {
+        auditServerNpcsDelta(
+            true
+        );
+    }
+
+    /**
+     * Compare la liste actuelle ServerNPC au snapshot précédent.
+     *
+     * force=false :
+     *   seulement les nouveaux UUID sont retirés des viewers.
+     *
+     * force=true :
+     *   tous les NPC actuels sont retirés une fois, utile si ServerNPC a
+     *   réinjecté un PlayerInfo sans changer son UUID.
+     */
+    public void auditServerNpcsDelta(
+            boolean force) {
 
         if (!config.isEnabled()
                 || !config.isVirtualLayoutEnabled()
@@ -228,39 +237,80 @@ public final class TabVisibilityController {
             return;
         }
 
-        List<TabProfile> npcProfiles =
+        npcScans++;
+
+        List<TabProfile> currentList =
             serverNpcHook.getNpcProfiles();
 
-        if (npcProfiles.isEmpty()) {
-            return;
+        Map<UUID, TabProfile> current =
+            toMap(
+                currentList
+            );
+
+        List<TabProfile> toHide =
+            new ArrayList<TabProfile>();
+
+        if (force) {
+
+            toHide.addAll(
+                current.values()
+            );
+
+            npcForceRehides++;
+
+        } else {
+
+            for (Map.Entry<UUID, TabProfile> entry
+                    : current.entrySet()) {
+
+                if (!npcSnapshot.containsKey(
+                        entry.getKey())) {
+
+                    toHide.add(
+                        entry.getValue()
+                    );
+                }
+            }
         }
 
-        for (Player viewer
-                : Bukkit.getOnlinePlayers()) {
+        if (toHide.isEmpty()) {
 
-            if (viewer == null
-                    || !viewer.isOnline()) {
+            npcNoChangeScans++;
 
-                continue;
+        } else {
+
+            for (Player viewer
+                    : Bukkit.getOnlinePlayers()) {
+
+                if (viewer == null
+                        || !viewer.isOnline()) {
+
+                    continue;
+                }
+
+                sendProfiles(
+                    viewer,
+                    toHide
+                );
             }
 
-            sendProfiles(
-                viewer,
-                npcProfiles
-            );
+            npcDeltaAdds +=
+                force
+                    ? 0L
+                    : toHide.size();
+
+            npcSweeps++;
         }
 
-        lastHiddenNpcs =
-            npcProfiles.size();
+        npcSnapshot.clear();
+        npcSnapshot.putAll(
+            current
+        );
 
-        npcSweeps++;
+        lastHiddenNpcs =
+            current.size();
     }
 
-    /**
-     * Réaffiche uniquement les vrais joueurs.
-     *
-     * ServerNPC reste responsable de ses propres NPC.
-     */
     public void restoreRealPlayers() {
 
         Collection<? extends Player> players =
@@ -287,10 +337,10 @@ public final class TabVisibilityController {
 
             } catch (RuntimeException failure) {
 
-                plugin.getLogger()
-                    .warning(
-                        failure.getMessage()
-                    );
+                KtabConsole.warning(
+                    plugin,
+                    failure.getMessage()
+                );
             }
         }
     }
@@ -327,13 +377,63 @@ public final class TabVisibilityController {
         return profileEntriesSent;
     }
 
+    public long getNpcScans() {
+        return npcScans;
+    }
+
+    public long getNpcNoChangeScans() {
+        return npcNoChangeScans;
+    }
+
+    public long getNpcDeltaAdds() {
+        return npcDeltaAdds;
+    }
+
+    public long getNpcForceRehides() {
+        return npcForceRehides;
+    }
+
+    public long getServerNpcReflectionResolves() {
+        return serverNpcHook
+            .getReflectionResolves();
+    }
+
+    public long getServerNpcReadFailures() {
+        return serverNpcHook
+            .getReadFailures();
+    }
+
     public void resetPerformanceMetrics() {
 
-        targetedHideOperations = 0L;
-        fullSweeps = 0L;
-        npcSweeps = 0L;
-        packetsSent = 0L;
-        profileEntriesSent = 0L;
+        targetedHideOperations =
+            0L;
+
+        fullSweeps =
+            0L;
+
+        npcSweeps =
+            0L;
+
+        packetsSent =
+            0L;
+
+        profileEntriesSent =
+            0L;
+
+        npcScans =
+            0L;
+
+        npcNoChangeScans =
+            0L;
+
+        npcDeltaAdds =
+            0L;
+
+        npcForceRehides =
+            0L;
+
+        serverNpcHook
+            .resetMetrics();
     }
 
     public String getNmsVersion() {
@@ -389,12 +489,18 @@ public final class TabVisibilityController {
             List<TabProfile> npcProfiles =
                 serverNpcHook.getNpcProfiles();
 
-            for (TabProfile profile
-                    : npcProfiles) {
+            Map<UUID, TabProfile> current =
+                toMap(
+                    npcProfiles
+                );
 
-                if (profile == null) {
-                    continue;
-                }
+            npcSnapshot.clear();
+            npcSnapshot.putAll(
+                current
+            );
+
+            for (TabProfile profile
+                    : current.values()) {
 
                 profiles.put(
                     profile.getUuid(),
@@ -412,6 +518,33 @@ public final class TabVisibilityController {
             realPlayers,
             npcs
         );
+    }
+
+    private Map<UUID, TabProfile> toMap(
+            Collection<TabProfile> profiles) {
+
+        Map<UUID, TabProfile> result =
+            new LinkedHashMap<UUID, TabProfile>();
+
+        if (profiles == null) {
+            return result;
+        }
+
+        for (TabProfile profile : profiles) {
+
+            if (profile == null
+                    || profile.getUuid() == null) {
+
+                continue;
+            }
+
+            result.put(
+                profile.getUuid(),
+                profile
+            );
+        }
+
+        return result;
     }
 
     private void sendProfiles(
@@ -434,15 +567,16 @@ public final class TabVisibilityController {
             );
 
             packetsSent++;
+
             profileEntriesSent +=
                 profiles.size();
 
         } catch (RuntimeException failure) {
 
-            plugin.getLogger()
-                .warning(
-                    failure.getMessage()
-                );
+            KtabConsole.warning(
+                plugin,
+                failure.getMessage()
+            );
         }
     }
 

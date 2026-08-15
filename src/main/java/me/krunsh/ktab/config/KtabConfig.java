@@ -95,6 +95,14 @@ public final class KtabConfig {
     private int performancePacketMaxEntriesPerPacket;
     private long performancePacketFailureLogIntervalTicks;
 
+    private boolean performanceRenderCacheEnabled;
+    private long performanceRenderDefaultTtlTicks;
+    private long performanceRenderStaticTtlTicks;
+    private long performanceRenderPermissionTtlTicks;
+    private int performanceRenderMaxCellsPerPlayer;
+
+    private long performanceServerNpcForceRehideTicks;
+
     public KtabConfig(
             KtabPlugin plugin) {
 
@@ -508,6 +516,57 @@ public final class KtabConfig {
                     100L
                 )
             );
+
+        performanceRenderCacheEnabled =
+            config.getBoolean(
+                "performance.render_cache.enabled",
+                true
+            );
+
+        performanceRenderDefaultTtlTicks =
+            Math.max(
+                0L,
+                config.getLong(
+                    "performance.render_cache.default_ttl_ticks",
+                    40L
+                )
+            );
+
+        performanceRenderStaticTtlTicks =
+            Math.max(
+                0L,
+                config.getLong(
+                    "performance.render_cache.static_ttl_ticks",
+                    1200L
+                )
+            );
+
+        performanceRenderPermissionTtlTicks =
+            Math.max(
+                0L,
+                config.getLong(
+                    "performance.render_cache.permission_ttl_ticks",
+                    40L
+                )
+            );
+
+        performanceRenderMaxCellsPerPlayer =
+            Math.max(
+                16,
+                config.getInt(
+                    "performance.render_cache.max_cells_per_player",
+                    96
+                )
+            );
+
+        performanceServerNpcForceRehideTicks =
+            Math.max(
+                0L,
+                config.getLong(
+                    "performance.visibility.servernpc_force_rehide_ticks",
+                    1200L
+                )
+            );
     }
 
     public boolean isEnabled() {
@@ -728,6 +787,30 @@ public final class KtabConfig {
 
     public long getPerformancePacketFailureLogIntervalTicks() {
         return performancePacketFailureLogIntervalTicks;
+    }
+
+    public boolean isPerformanceRenderCacheEnabled() {
+        return performanceRenderCacheEnabled;
+    }
+
+    public long getPerformanceRenderDefaultTtlTicks() {
+        return performanceRenderDefaultTtlTicks;
+    }
+
+    public long getPerformanceRenderStaticTtlTicks() {
+        return performanceRenderStaticTtlTicks;
+    }
+
+    public long getPerformanceRenderPermissionTtlTicks() {
+        return performanceRenderPermissionTtlTicks;
+    }
+
+    public int getPerformanceRenderMaxCellsPerPlayer() {
+        return performanceRenderMaxCellsPerPlayer;
+    }
+
+    public long getPerformanceServerNpcForceRehideTicks() {
+        return performanceServerNpcForceRehideTicks;
     }
 
     private List<PlaceholderCacheRule> loadPlaceholderCacheRules(

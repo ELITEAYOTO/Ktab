@@ -6,6 +6,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import me.krunsh.ktab.command.KtabCommand;
 import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.listener.KtabPlayerListener;
+import me.krunsh.ktab.logging.KtabConsole;
 import me.krunsh.ktab.performance.DirtyReason;
 import me.krunsh.ktab.performance.KtabSchedulerService;
 import me.krunsh.ktab.render.PlaceholderRenderer;
@@ -113,8 +114,10 @@ public final class KtabPlugin extends JavaPlugin {
                 );
         }
 
-        getLogger().info(
-            "Ktab actif."
+        KtabConsole.startupSummary(
+            this,
+            ktabConfig,
+            visibilityController
         );
     }
 

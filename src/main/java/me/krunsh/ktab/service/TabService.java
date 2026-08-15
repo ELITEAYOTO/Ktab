@@ -10,6 +10,7 @@ import org.bukkit.entity.Player;
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.cache.RenderedTabCache;
 import me.krunsh.ktab.config.KtabConfig;
+import me.krunsh.ktab.logging.KtabConsole;
 import me.krunsh.ktab.packet.TabPacketSender;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 
@@ -73,7 +74,8 @@ public final class TabService {
             return;
         }
 
-        plugin.getLogger().info(
+        KtabConsole.success(
+            plugin,
             "TabService prêt - NMS="
                 + packetSender.getNmsVersion()
                 + ", scheduler=central V9."
