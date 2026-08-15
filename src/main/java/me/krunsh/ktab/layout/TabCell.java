@@ -1,5 +1,7 @@
 package me.krunsh.ktab.layout;
 
+import me.krunsh.ktab.condition.TabConditionGroup;
+
 /**
  * Cellule configurée avant rendu PlaceholderAPI.
  *
@@ -11,6 +13,7 @@ public final class TabCell {
     private final String text;
     private final String skinId;
     private final int configuredRow;
+    private final TabConditionGroup conditions;
 
     public TabCell(
             String text,
@@ -19,7 +22,8 @@ public final class TabCell {
         this(
             text,
             skinId,
-            0
+            0,
+            TabConditionGroup.ALWAYS
         );
     }
 
@@ -27,6 +31,20 @@ public final class TabCell {
             String text,
             String skinId,
             int configuredRow) {
+
+        this(
+            text,
+            skinId,
+            configuredRow,
+            TabConditionGroup.ALWAYS
+        );
+    }
+
+    public TabCell(
+            String text,
+            String skinId,
+            int configuredRow,
+            TabConditionGroup conditions) {
 
         this.text =
             text == null
@@ -40,6 +58,11 @@ public final class TabCell {
 
         this.configuredRow =
             configuredRow;
+
+        this.conditions =
+            conditions == null
+                ? TabConditionGroup.ALWAYS
+                : conditions;
     }
 
     public String getText() {
@@ -56,5 +79,13 @@ public final class TabCell {
 
     public boolean hasExplicitRow() {
         return configuredRow != 0;
+    }
+
+    public TabConditionGroup getConditions() {
+        return conditions;
+    }
+
+    public boolean hasConditions() {
+        return !conditions.isEmpty();
     }
 }

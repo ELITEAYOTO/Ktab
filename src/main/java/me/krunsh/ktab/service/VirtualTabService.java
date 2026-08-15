@@ -14,6 +14,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
+import me.krunsh.ktab.layout.LayoutRenderResult;
 import me.krunsh.ktab.layout.RenderedVirtualCell;
 import me.krunsh.ktab.layout.VirtualLayoutRenderer;
 import me.krunsh.ktab.packet.VirtualEntry;
@@ -231,18 +232,30 @@ public final class VirtualTabService {
         skinPreviews.clear();
     }
 
-    public List<RenderedVirtualCell> previewCells(
+    public LayoutRenderResult previewDetailed(
             Player viewer) {
 
         if (viewer == null) {
-            return Collections.emptyList();
+
+            return new LayoutRenderResult(
+                Collections.<RenderedVirtualCell>emptyList(),
+                Collections.<me.krunsh.ktab.layout.LayoutDecision>emptyList()
+            );
         }
 
-        return layoutRenderer.render(
+        return layoutRenderer.renderDetailed(
             viewer,
             Bukkit.getOnlinePlayers()
                 .size()
         );
+    }
+
+    public List<RenderedVirtualCell> previewCells(
+            Player viewer) {
+
+        return previewDetailed(
+            viewer
+        ).getCells();
     }
 
     /**

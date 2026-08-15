@@ -1,0 +1,41 @@
+# Exemple de conditions V8.
+
+virtual_layout:
+  columns:
+
+    infos:
+      enabled: true
+      title: "&6&lVOLKARIA"
+      title_row: 1
+
+      lines:
+        - row: 2
+          text: "&7Joueur: &f%player_name%"
+          skin: "viewer"
+
+        - row: 3
+          text: "&7Métier: &e%kjob_display_job_name%"
+
+        - row: 8
+          text: "&aQuête à récupérer !"
+          when:
+            type: not_equals
+            input: "%kjob_claimable_quests%"
+            value: "0"
+
+    vip:
+      enabled: true
+      title: "&d&lVIP"
+
+      when:
+        mode: any
+        conditions:
+          - type: permission
+            value: "volkaria.vip"
+
+          - type: permission
+            value: "volkaria.premium"
+
+      lines:
+        - row: 2
+          text: "&dBonus VIP actif"

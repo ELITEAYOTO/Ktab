@@ -14,6 +14,8 @@ import org.bukkit.entity.Player;
 
 import me.krunsh.ktab.KtabPlugin;
 import me.krunsh.ktab.config.KtabConfig;
+import me.krunsh.ktab.layout.LayoutDecision;
+import me.krunsh.ktab.layout.LayoutRenderResult;
 import me.krunsh.ktab.layout.RenderedVirtualCell;
 import me.krunsh.ktab.render.PlaceholderRenderer;
 import me.krunsh.ktab.service.TabService;
@@ -550,11 +552,14 @@ public final class KtabCommand
             }
         }
 
-        List<RenderedVirtualCell> cells =
+        LayoutRenderResult detailed =
             virtualTabService
-                .previewCells(
+                .previewDetailed(
                     viewer
                 );
+
+        List<RenderedVirtualCell> cells =
+            detailed.getCells();
 
         final int pageSize =
             15;
@@ -647,6 +652,45 @@ public final class KtabCommand
                     page + 1
                 )
         );
+
+        if (!detailed.getDecisions()
+                .isEmpty()) {
+
+            sender.sendMessage(
+                "§7Conditions:"
+            );
+
+            int shown =
+                0;
+
+            for (LayoutDecision decision
+                    : detailed.getDecisions()) {
+
+                if (shown >= 8) {
+
+                    sender.sendMessage(
+                        "§8  ... "
+                            + (detailed.getDecisions()
+                                .size() - shown)
+                            + " décision(s) supplémentaire(s)"
+                    );
+
+                    break;
+                }
+
+                sender.sendMessage(
+                    (decision.isVisible()
+                        ? "§a✔ "
+                        : "§c✘ ")
+                        + "§7"
+                        + decision.getPath()
+                        + " §8- §f"
+                        + decision.getReason()
+                );
+
+                shown++;
+            }
+        }
 
         sender.sendMessage(
             "§8----------------------------------------"

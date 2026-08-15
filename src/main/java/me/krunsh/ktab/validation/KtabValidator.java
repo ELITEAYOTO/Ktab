@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import me.krunsh.ktab.condition.TabCondition;
+import me.krunsh.ktab.condition.TabConditionGroup;
 import me.krunsh.ktab.config.KtabConfig;
 import me.krunsh.ktab.layout.TabCell;
 import me.krunsh.ktab.layout.TabColumn;
@@ -146,6 +148,12 @@ public final class KtabValidator {
             "virtual_layout.columns."
                 + column.getId();
 
+        validateConditions(
+            issues,
+            base + ".when",
+            column.getConditions()
+        );
+
         validateSkin(
             issues,
             base + ".skin",
@@ -233,6 +241,12 @@ public final class KtabValidator {
             return;
         }
 
+        validateConditions(
+            issues,
+            path + ".when",
+            cell.getConditions()
+        );
+
         validateSkin(
             issues,
             path + ".skin",
@@ -279,6 +293,174 @@ public final class KtabValidator {
                     + previous
                     + "."
             );
+        }
+    }
+
+    private void validateConditions(
+            List<ValidationIssue> issues,
+            String path,
+            TabConditionGroup group) {
+
+        if (group == null
+                || group.isEmpty()) {
+
+            return;
+        }
+
+        int index =
+            0;
+
+        for (TabCondition condition
+                : group.getConditions()) {
+
+            String conditionPath =
+                path
+                    + ".conditions["
+                    + index
+                    + "]";
+
+            if (condition == null) {
+
+                error(
+                    issues,
+                    conditionPath,
+                    "Condition vide."
+                );
+
+                index++;
+                continue;
+            }
+
+            String type =
+                condition.getType();
+
+            if (!isSupportedConditionType(
+                    type)) {
+
+                error(
+                    issues,
+                    conditionPath + ".type",
+                    "Type de condition inconnu '"
+                        + type
+                        + "'."
+                );
+
+                index++;
+                continue;
+            }
+
+            if (("permission".equals(type)
+                    || "not_permission".equals(type))
+                    && condition.getValue()
+                        .trim()
+                        .isEmpty()) {
+
+                error(
+                    issues,
+                    conditionPath + ".value",
+                    "Permission manquante."
+                );
+            }
+
+            if (requiresInput(type)
+                    && condition.getInput()
+                        .trim()
+                        .isEmpty()) {
+
+                error(
+                    issues,
+                    conditionPath + ".input",
+                    "Input/placeholder manquant."
+                );
+            }
+
+            if (requiresValue(type)
+                    && condition.getValue()
+                        .trim()
+                        .isEmpty()) {
+
+                error(
+                    issues,
+                    conditionPath + ".value",
+                    "Valeur de comparaison manquante."
+                );
+            }
+
+            if (("online_min".equals(type)
+                    || "online_max".equals(type))
+                    && !isInteger(
+                        condition.getValue()
+                    )) {
+
+                error(
+                    issues,
+                    conditionPath + ".value",
+                    "Valeur numérique attendue pour "
+                        + type
+                        + "."
+                );
+            }
+
+            index++;
+        }
+    }
+
+    private static boolean isSupportedConditionType(
+            String type) {
+
+        return "permission".equals(type)
+            || "not_permission".equals(type)
+            || "equals".equals(type)
+            || "not_equals".equals(type)
+            || "contains".equals(type)
+            || "not_contains".equals(type)
+            || "starts_with".equals(type)
+            || "ends_with".equals(type)
+            || "empty".equals(type)
+            || "not_empty".equals(type)
+            || "online_min".equals(type)
+            || "online_max".equals(type);
+    }
+
+    private static boolean requiresInput(
+            String type) {
+
+        return "equals".equals(type)
+            || "not_equals".equals(type)
+            || "contains".equals(type)
+            || "not_contains".equals(type)
+            || "starts_with".equals(type)
+            || "ends_with".equals(type)
+            || "empty".equals(type)
+            || "not_empty".equals(type);
+    }
+
+    private static boolean requiresValue(
+            String type) {
+
+        return "equals".equals(type)
+            || "not_equals".equals(type)
+            || "contains".equals(type)
+            || "not_contains".equals(type)
+            || "starts_with".equals(type)
+            || "ends_with".equals(type)
+            || "online_min".equals(type)
+            || "online_max".equals(type);
+    }
+
+    private static boolean isInteger(
+            String value) {
+
+        try {
+
+            Integer.parseInt(
+                value.trim()
+            );
+
+            return true;
+
+        } catch (Exception ignored) {
+            return false;
         }
     }
 

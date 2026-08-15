@@ -12,6 +12,8 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import me.krunsh.ktab.KtabPlugin;
+import me.krunsh.ktab.condition.TabCondition;
+import me.krunsh.ktab.condition.TabConditionGroup;
 import me.krunsh.ktab.layout.TabCell;
 import me.krunsh.ktab.layout.TabColumn;
 import me.krunsh.ktab.skin.TabSkinDefinition;
@@ -586,6 +588,13 @@ public final class KtabConfig {
                     defaultSkin
                 );
 
+            TabConditionGroup conditions =
+                loadConditionGroup(
+                    section.get(
+                        "when"
+                    )
+                );
+
             result.add(
                 new TabColumn(
                     id,
@@ -595,7 +604,8 @@ public final class KtabConfig {
                         titleSkin,
                         titleRow
                     ),
-                    lines
+                    lines,
+                    conditions
                 )
             );
         }
@@ -684,6 +694,13 @@ public final class KtabConfig {
                         rowValue
                     );
 
+                TabConditionGroup conditions =
+                    loadConditionGroup(
+                        map.get(
+                            "when"
+                        )
+                    );
+
                 result.add(
                     new TabCell(
                         textValue == null
@@ -698,7 +715,8 @@ public final class KtabConfig {
                                     skinValue
                                 )
                             ),
-                        configuredRow
+                        configuredRow,
+                        conditions
                     )
                 );
 
@@ -715,6 +733,240 @@ public final class KtabConfig {
 
         return Collections.unmodifiableList(
             result
+        );
+    }
+
+    private TabConditionGroup loadConditionGroup(
+            Object raw) {
+
+        if (raw == null) {
+            return TabConditionGroup.ALWAYS;
+        }
+
+        if (raw instanceof ConfigurationSection) {
+
+            ConfigurationSection section =
+                (ConfigurationSection) raw;
+
+            String mode =
+                section.getString(
+                    "mode",
+                    "all"
+                );
+
+            List<TabCondition> conditions =
+                loadConditions(
+                    section.getList(
+                        "conditions"
+                    )
+                );
+
+            if (conditions.isEmpty()
+                    && section.contains(
+                        "type"
+                    )) {
+
+                TabCondition single =
+                    loadCondition(
+                        section
+                    );
+
+                if (single != null) {
+                    conditions.add(single);
+                }
+            }
+
+            return new TabConditionGroup(
+                parseConditionMode(
+                    mode
+                ),
+                conditions
+            );
+        }
+
+        if (raw instanceof Map<?, ?>) {
+
+            Map<?, ?> map =
+                (Map<?, ?>) raw;
+
+            Object modeValue =
+                map.get(
+                    "mode"
+                );
+
+            String mode =
+                modeValue == null
+                    ? "all"
+                    : String.valueOf(
+                        modeValue
+                    );
+
+            List<TabCondition> conditions =
+                loadConditionsObject(
+                    map.get(
+                        "conditions"
+                    )
+                );
+
+            if (conditions.isEmpty()
+                    && map.containsKey(
+                        "type"
+                    )) {
+
+                TabCondition single =
+                    loadCondition(
+                        map
+                    );
+
+                if (single != null) {
+                    conditions.add(single);
+                }
+            }
+
+            return new TabConditionGroup(
+                parseConditionMode(
+                    mode
+                ),
+                conditions
+            );
+        }
+
+        return TabConditionGroup.ALWAYS;
+    }
+
+    private List<TabCondition> loadConditions(
+            List<?> rawConditions) {
+
+        return loadConditionsObject(
+            rawConditions
+        );
+    }
+
+    private List<TabCondition> loadConditionsObject(
+            Object rawConditions) {
+
+        List<TabCondition> result =
+            new ArrayList<TabCondition>();
+
+        if (!(rawConditions
+                instanceof Iterable<?>)) {
+
+            return result;
+        }
+
+        for (Object raw
+                : (Iterable<?>) rawConditions) {
+
+            TabCondition condition =
+                loadCondition(
+                    raw
+                );
+
+            if (condition != null) {
+                result.add(condition);
+            }
+        }
+
+        return result;
+    }
+
+    private TabCondition loadCondition(
+            Object raw) {
+
+        if (raw instanceof ConfigurationSection) {
+
+            ConfigurationSection section =
+                (ConfigurationSection) raw;
+
+            return new TabCondition(
+                section.getString(
+                    "type",
+                    ""
+                ),
+                section.getString(
+                    "input",
+                    ""
+                ),
+                section.getString(
+                    "value",
+                    ""
+                ),
+                section.getBoolean(
+                    "case_sensitive",
+                    false
+                )
+            );
+        }
+
+        if (raw instanceof Map<?, ?>) {
+
+            Map<?, ?> map =
+                (Map<?, ?>) raw;
+
+            return new TabCondition(
+                mapString(
+                    map,
+                    "type"
+                ),
+                mapString(
+                    map,
+                    "input"
+                ),
+                mapString(
+                    map,
+                    "value"
+                ),
+                mapBoolean(
+                    map,
+                    "case_sensitive",
+                    false
+                )
+            );
+        }
+
+        return null;
+    }
+
+    private static TabConditionGroup.Mode parseConditionMode(
+            String raw) {
+
+        if (raw != null
+                && "any".equalsIgnoreCase(
+                    raw.trim()
+                )) {
+
+            return TabConditionGroup.Mode.ANY;
+        }
+
+        return TabConditionGroup.Mode.ALL;
+    }
+
+    private static String mapString(
+            Map<?, ?> map,
+            String key) {
+
+        Object value =
+            map.get(key);
+
+        return value == null
+            ? ""
+            : String.valueOf(value);
+    }
+
+    private static boolean mapBoolean(
+            Map<?, ?> map,
+            String key,
+            boolean fallback) {
+
+        Object value =
+            map.get(key);
+
+        if (value == null) {
+            return fallback;
+        }
+
+        return Boolean.parseBoolean(
+            String.valueOf(value)
         );
     }
 

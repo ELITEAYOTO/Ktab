@@ -4,23 +4,42 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import me.krunsh.ktab.condition.TabConditionGroup;
+
 /**
  * Définition immuable d'une colonne du layout virtuel.
  */
 public final class TabColumn {
 
     private final String id;
-
     private final String defaultSkinId;
 
     private final TabCell title;
     private final List<TabCell> lines;
+
+    private final TabConditionGroup conditions;
 
     public TabColumn(
             String id,
             String defaultSkinId,
             TabCell title,
             List<TabCell> lines) {
+
+        this(
+            id,
+            defaultSkinId,
+            title,
+            lines,
+            TabConditionGroup.ALWAYS
+        );
+    }
+
+    public TabColumn(
+            String id,
+            String defaultSkinId,
+            TabCell title,
+            List<TabCell> lines,
+            TabConditionGroup conditions) {
 
         this.id =
             id == null
@@ -51,6 +70,11 @@ public final class TabColumn {
             Collections.unmodifiableList(
                 copy
             );
+
+        this.conditions =
+            conditions == null
+                ? TabConditionGroup.ALWAYS
+                : conditions;
     }
 
     public String getId() {
@@ -67,5 +91,13 @@ public final class TabColumn {
 
     public List<TabCell> getLines() {
         return lines;
+    }
+
+    public TabConditionGroup getConditions() {
+        return conditions;
+    }
+
+    public boolean hasConditions() {
+        return !conditions.isEmpty();
     }
 }

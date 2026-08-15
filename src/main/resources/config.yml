@@ -1,109 +1,539 @@
-# ============================================================
-# Ktab — Configuration
-# ============================================================
+# =====================================================================
+# Ktab — Configuration principale
+# Volkaria / Minecraft 1.8.8 / PandaSpigot-KhopeSpigot
+# =====================================================================
+#
+# Cette configuration exploite les fonctionnalités Ktab V8 :
+# - Header / footer
+# - Layout virtuel 3 colonnes
+# - Rows fixes 1..20
+# - Custom heads / skins
+# - Conditions dynamiques
+# - PlaceholderAPI
+# - Masquage joueurs réels + ServerNPC
+#
+# Commandes utiles après modification :
+#   /ktab reload
+#   /ktab validate
+#   /ktab dump
+#   /ktab debug
+#
+# =====================================================================
+
+
+# ---------------------------------------------------------------------
+# GÉNÉRAL
+# ---------------------------------------------------------------------
 
 enabled: true
 
-update_interval_ticks: 40
+# Active quelques logs supplémentaires du moteur de skins en cas de problème.
+# Laisser false en production.
+debug: false
+
+# PlaceholderAPI est le contrat principal entre Ktab et les autres plugins.
 placeholderapi: true
+
+# Fréquence du Header/Footer.
+# 20 ticks = 1 seconde.
+update_interval_ticks: 40
+
+
+# ---------------------------------------------------------------------
+# HEADER / FOOTER
+# ---------------------------------------------------------------------
+#
+# Supporte PlaceholderAPI + couleurs Minecraft avec &.
+#
 
 header:
   - "&6&lVOLKARIA"
-  - "&7Bienvenue &f%player_name%"
+  - "&eV1.0 &6L'Empire du Désert"
+  - "&8&m------------------------------"
 
 footer:
-  - ""
-  - "&7Métier: &f%kjob_display_job_name%"
-  - "&7Niveau global: &e%kjob_global_level%"
+  - "&8&m------------------------------"
+  - "&7Joueurs en ligne: &f%server_online%"
+  - "&7Métier: &f%kjob_display_job_name% &8• &7Niveau global: &e%kjob_global_level%"
   - "&7Quêtes à récupérer: &a%kjob_claimable_quests%"
 
+
+# ---------------------------------------------------------------------
+# NOM DES VRAIS JOUEURS DANS LE PLAYER LIST
+# ---------------------------------------------------------------------
+#
+# Avec visibility.hide_real_players=true, les vrais joueurs sont retirés
+# du TAB. Cette section peut donc rester désactivée.
+#
 player_list_name:
   enabled: false
   format: "&7%player_name%"
   max_length: 16
 
-# ============================================================
-# VISIBILITÉ DES ENTRÉES VANILLA / NPC
-# ============================================================
+
+# ---------------------------------------------------------------------
+# VISIBILITÉ VANILLA / NPC
+# ---------------------------------------------------------------------
 #
-# IMPORTANT :
-# ces options retirent uniquement les entrées du PlayerInfo/TAB.
-# Elles ne rendent PAS les joueurs ou NPC invisibles dans le monde.
+# REMOVE_PLAYER agit uniquement sur la liste TAB.
+# Les joueurs et NPC restent visibles normalement dans le monde.
 #
 visibility:
 
-  # Recommandé avec le layout virtuel.
-  # Empêche les vrais pseudos de prendre une cellule et de décaler les colonnes.
+  # Empêche les vrais pseudos de prendre des cellules dans la grille Ktab.
   hide_real_players: true
 
-  # Hook optionnel sur le plugin "ServerNPC".
-  # Ktab lit ServerNPC.getAPI().getNPCList() puis retire leurs UUID du TAB.
+  # Retire également les entrées PlayerInfo créées par ServerNPC.
+  # Le hook est optionnel : si ServerNPC n'est pas installé, Ktab continue.
   hide_servernpc: true
 
-  # Laisse vanilla + ServerNPC terminer leur séquence de spawn/skin avant
-  # d'appliquer le premier nettoyage du TAB au join.
+  # Délai après connexion avant le premier nettoyage du TAB.
+  # Permet à Minecraft / ServerNPC de terminer leur séquence PlayerInfo.
   initial_hide_delay_ticks: 20
 
-# ============================================================
+
+# =====================================================================
+# SKINS / CUSTOM HEADS
+# =====================================================================
+#
+# IDs intégrés :
+#
+#   none
+#     -> skin par défaut d'une fake entry.
+#
+#   viewer
+#     -> skin du joueur qui regarde son TAB.
+#
+#   player:<pseudo>
+#     -> skin d'un joueur précis actuellement connecté.
+#        Exemple : player:Krunsh_
+#
+# Tu peux déclarer tes propres skins ci-dessous.
+#
+# Formats supportés :
+#   texture_hash
+#   texture_url
+#   value
+#   value + signature
+#
+# Exemple :
+#
+# skins:
+#   volkaria:
+#     enabled: true
+#     texture_hash: "TON_HASH_TEXTURES_MINECRAFT_NET"
+#     cache_key: "volkaria"
+#
+#   metiers:
+#     enabled: true
+#     texture_url: "http://textures.minecraft.net/texture/TON_HASH"
+#
+# Si tu n'as pas encore de textures custom, laisse simplement {}.
+#
+skins: {}
+
+
+# =====================================================================
 # LAYOUT VIRTUEL
-# ============================================================
+# =====================================================================
 
 virtual_layout:
+
   enabled: true
 
+  # Rafraîchissement du contenu virtuel.
+  # Le diff de Ktab empêche l'envoi de packets inutiles si rien n'a changé.
   update_interval_ticks: 40
 
+  # Minecraft 1.8 :
+  # maximum pratique = 4 colonnes x 20 lignes = 80 entrées.
+  #
+  # Layout Volkaria actuel :
+  # 3 colonnes x 15 lignes = 45 entrées.
+  #
   columns_count: 3
   rows: 15
 
-  # Avec hide_real_players=true, la place des joueurs réels n'est plus réservée.
+  # Avec hide_real_players=true, les 45 entrées peuvent appartenir à Ktab.
   max_entries: 45
+
+  # Utilisé uniquement si les vrais joueurs restent affichés.
   reserve_real_entries: 1
+
+  # Conserve une grille client stable.
   force_client_rows: true
 
+
+  # -------------------------------------------------------------------
+  # IDENTITÉ DES FAKE ENTRIES
+  # -------------------------------------------------------------------
+
   ordering:
+
+    # Nom technique invisible utilisé par les GameProfile fake.
     technical_name_prefix: "!kt_"
+
+    # Seed des UUID déterministes.
+    # Ne pas modifier sans raison sur un serveur déjà en production.
     stable_uuid_seed: "volkaria-ktab"
+
     start_index: 1
 
+
+  # -------------------------------------------------------------------
+  # RENDU GLOBAL DES CELLULES
+  # -------------------------------------------------------------------
+
+  # Skin utilisée lorsqu'une colonne / cellule n'en définit pas.
+  default_skin: "none"
+
   render:
-    # §8 directement plutôt que "&8" : les entrées de remplissage ne sont
-    # pas rerendues une deuxième fois après leur insertion.
+
+    # Une cellule vide doit tout de même exister afin de conserver
+    # exactement la géométrie 3 x 15.
     blank_text: "§8"
+
+    # Skin des cellules de remplissage.
+    blank_skin: "none"
+
+    # Préfixe / suffixe appliqués à toutes les cellules virtuelles.
     cell_prefix: ""
     cell_suffix: ""
 
+
+  # ===================================================================
+  # COLONNES
+  # ===================================================================
+  #
+  # IMPORTANT :
+  # - row est numéroté de 1 à 15 ici.
+  # - une row fixe masquée par une condition RESTE réservée.
+  # - le layout ne se décale donc pas lorsque l'information disparaît.
+  #
   columns:
 
+
+    # =================================================================
+    # COLONNE 1 — PROFIL JOUEUR
+    # =================================================================
+
     infos:
+
       enabled: true
+
+      # Skin par défaut de la colonne.
+      skin: "none"
+
       title: "&6&lVOLKARIA"
+      title_row: 1
+      title_skin: "none"
+
       lines:
-        - text: "&7Joueur: &f%player_name%"
+
+        # -------------------------------------------------------------
+        # Identité
+        # -------------------------------------------------------------
+
+        - row: 2
+          text: "&7Joueur: &f%player_name%"
           skin: "viewer"
 
-        - "&7Métier: &e%kjob_display_job_name%"
-        - "&7Niveau global: &e%kjob_global_level%"
-        - ""
-        - "&7Slots: &f%kjob_slots_used%&8/&f%kjob_slots_unlocked%"
-        - "&7Quêtes: &a%kjob_claimable_quests%"
+        - row: 3
+          text: "&7Métier: &e%kjob_display_job_name%"
+
+        - row: 4
+          text: "&7Niveau global: &e%kjob_global_level%"
+
+        # Row 5 volontairement vide.
+
+
+        # -------------------------------------------------------------
+        # Slots métiers
+        # -------------------------------------------------------------
+
+        - row: 6
+          text: "&7Slots: &f%kjob_slots_used%&8/&f%kjob_slots_unlocked%"
+
+
+        # -------------------------------------------------------------
+        # Quêtes
+        # -------------------------------------------------------------
+
+        - row: 7
+          text: "&7Quêtes: &a%kjob_claimable_quests%"
+
+
+        # Alerte supplémentaire uniquement si quelque chose est à récupérer.
+        #
+        # Comme row=8 est fixe, la ligne reste vide lorsque la condition
+        # est fausse : aucun autre élément ne bouge.
+        #
+        - row: 8
+          text: "&a&l✔ Récompense disponible !"
+
+          when:
+            type: not_equals
+            input: "%kjob_claimable_quests%"
+            value: "0"
+
+
+        # -------------------------------------------------------------
+        # Informations admin
+        # -------------------------------------------------------------
+        #
+        # Visible uniquement pour les joueurs ayant ktab.admin.
+        #
+        - row: 11
+          text: "&cMode administration"
+
+          when:
+            type: permission
+            value: "ktab.admin"
+
+
+        # Exemple de condition multiple :
+        #
+        # - row: 12
+        #   text: "&dVIP Mineur"
+        #
+        #   when:
+        #     mode: all
+        #     conditions:
+        #       - type: permission
+        #         value: "volkaria.vip"
+        #
+        #       - type: equals
+        #         input: "%kjob_active_mineur%"
+        #         value: "true"
+
+
+
+    # =================================================================
+    # COLONNE 2 — MÉTIERS
+    # =================================================================
 
     jobs:
+
       enabled: true
+
+      skin: "none"
+
       title: "&e&lMÉTIERS"
+      title_row: 1
+      title_skin: "none"
+
       lines:
-        - "&7Mineur: &fNv.%kjob_level_mineur%"
-        - "&7Farmer: &fNv.%kjob_level_farmer%"
-        - "&7Chasseur: &fNv.%kjob_level_hunter%"
-        - "&7Prétorien: &fNv.%kjob_level_pretorien%"
-        - "&7Artisan: &fNv.%kjob_level_artisan%"
-        - "&7Pilleur: &fNv.%kjob_level_pilleur%"
+
+        - row: 2
+          text: "&7Mineur: &fNv.&e%kjob_level_mineur%"
+
+        - row: 3
+          text: "&7Farmer: &fNv.&e%kjob_level_farmer%"
+
+        - row: 4
+          text: "&7Chasseur: &fNv.&e%kjob_level_hunter%"
+
+        - row: 5
+          text: "&7Prétorien: &fNv.&e%kjob_level_pretorien%"
+
+        - row: 6
+          text: "&7Artisan: &fNv.&e%kjob_level_artisan%"
+
+        - row: 7
+          text: "&7Pilleur: &fNv.&e%kjob_level_pilleur%"
+
+
+        # -------------------------------------------------------------
+        # Métier actuellement affiché
+        # -------------------------------------------------------------
+
+        - row: 9
+          text: "&6Favori: &f%kjob_display_job_name%"
+
+          when:
+            type: not_empty
+            input: "%kjob_display_job_name%"
+
+
+        # -------------------------------------------------------------
+        # Nombre de jobs actifs
+        # -------------------------------------------------------------
+
+        - row: 10
+          text: "&7Jobs actifs: &f%kjob_active_jobs_count%"
+
+
+        # -------------------------------------------------------------
+        # Exemple : affichage conditionnel Mineur
+        # -------------------------------------------------------------
+        #
+        # - row: 12
+        #   text: "&aMineur actuellement actif"
+        #
+        #   when:
+        #     type: equals
+        #     input: "%kjob_active_mineur%"
+        #     value: "true"
+
+
+
+    # =================================================================
+    # COLONNE 3 — SERVEUR
+    # =================================================================
 
     server:
+
       enabled: true
+
+      skin: "none"
+
       title: "&b&lSERVEUR"
+      title_row: 1
+      title_skin: "none"
+
       lines:
-        - "&7En ligne: &f%server_online%"
-        - "&7Ping: &f%player_ping%ms"
-        - ""
-        - "&7www.volkaria.fr"
+
+        # -------------------------------------------------------------
+        # Serveur
+        # -------------------------------------------------------------
+
+        - row: 2
+          text: "&7En ligne: &f%server_online%&8/&f%server_max_players%"
+
+        - row: 3
+          text: "&7Ping: &f%player_ping%ms"
+
+
+        # Row 4 volontairement vide.
+
+
+        - row: 5
+          text: "&bwww.volkaria.fr"
+
+
+        # -------------------------------------------------------------
+        # État selon le ping
+        # -------------------------------------------------------------
+        #
+        # Ktab V8 ne fait pas encore de comparaison numérique générique
+        # sur %player_ping%, donc on garde simplement l'affichage du ping.
+        # online_min / online_max sont eux directement supportés.
+
+
+        # -------------------------------------------------------------
+        # Population
+        # -------------------------------------------------------------
+
+        - row: 7
+          text: "&aServeur animé !"
+
+          when:
+            type: online_min
+            value: "10"
+
+
+        - row: 8
+          text: "&7Encore quelques places..."
+
+          when:
+            type: online_min
+            value: "2"
+
+
+        # -------------------------------------------------------------
+        # Staff uniquement
+        # -------------------------------------------------------------
+
+        - row: 11
+          text: "&c&lSTAFF"
+
+          when:
+            type: permission
+            value: "ktab.admin"
+
+        - row: 12
+          text: "&7/ktab validate"
+
+          when:
+            type: permission
+            value: "ktab.admin"
+
+        - row: 13
+          text: "&7/ktab dump"
+
+          when:
+            type: permission
+            value: "ktab.admin"
+
+
+# =====================================================================
+# RAPPEL CONDITIONS V8
+# =====================================================================
+#
+# Condition unique :
+#
+# when:
+#   type: permission
+#   value: "volkaria.vip"
+#
+#
+# Plusieurs conditions :
+#
+# when:
+#   mode: all
+#   conditions:
+#     - type: permission
+#       value: "volkaria.vip"
+#
+#     - type: equals
+#       input: "%kjob_active_mineur%"
+#       value: "true"
+#
+#
+# Modes :
+#   all
+#   any
+#
+#
+# Types :
+#
+#   permission
+#   not_permission
+#
+#   equals
+#   not_equals
+#
+#   contains
+#   not_contains
+#   starts_with
+#   ends_with
+#
+#   empty
+#   not_empty
+#
+#   online_min
+#   online_max
+#
+#
+# Option :
+#
+#   case_sensitive: true
+#
+#
+# =====================================================================
+# COMMANDES DE DIAGNOSTIC
+# =====================================================================
+#
+# /ktab reload
+# /ktab status
+# /ktab validate
+# /ktab dump
+# /ktab dump <joueur> <page>
+# /ktab debug
+#
+# /ktab skin list
+# /ktab skin info <skinId>
+# /ktab skin test <skinId>
+# /ktab skin clear
+#
+# =====================================================================
